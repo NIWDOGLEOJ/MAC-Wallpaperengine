@@ -1,6 +1,6 @@
 # Wallpaper Engine Core (macOS)
 
-An open-source, high-performance native macOS live desktop wallpaper engine (clean alternative to Walyro). Built with Swift 6, AppKit, AVFoundation, and IOKit.
+An open-source, high-performance native macOS live desktop wallpaper engine. Built with Swift 6, AppKit, AVFoundation, and IOKit.
 
 ## Key Features
 
