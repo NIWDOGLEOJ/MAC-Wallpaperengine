@@ -8,13 +8,29 @@ An open-source, high-performance native macOS live desktop wallpaper engine. Bui
 - **Seamless Mission Control & Spaces Integration**: Full `.canJoinAllSpaces`, `.stationary`, and `.ignoresCycle` support — persists across Spaces without appearing in `Cmd+Tab` or window switchers.
 - **Dynamic Multi-Monitor Management**: Detects display connect/disconnect, resolution changes, and sleep/wake events with automatic layout reconciliation and zero memory leaks.
 - **Hardware-Accelerated Looping Video Engine**: Uses `AVPlayerLooper` and `AVQueuePlayer` for gapless, zero-flash video looping (MP4/MOV) with 4-tier audio suppression.
-- **Per-Display Video Routing**: Assign different videos to different monitors or maintain synchronized multi-display setups.
+- **AI 3D Parallax Photo Scenes**:
+  - Converts standard 2D photos into dynamic 3D depth-displaced scenes via Depth Anything V2 CoreML neural models.
+  - Interactive mouse/trackpad pointer parallax driver (with clamp physics and smoothing).
+  - Head-tracking support via Apple's Vision framework.
+- **Real-Time Metal Procedural Shaders**:
+  - 5 high-performance built-in procedural presets: `aurora`, `starfield`, `gradientFlow`, `cyberpunkGrid`, `bokeh`.
+  - Full Shadertoy GLSL / MSL importer with automatic syntax wrapping and coordinate inversion.
+  - Dynamic runtime speed multiplier and hot-reloading.
+- **Audio-Reactive Visualizer**:
+  - Live system audio capture via `ScreenCaptureKit` stream tap.
+  - High-performance frequency decomposition with Accelerate `vDSP` 1024-point FFT into 16 frequency bands.
+  - Drives live Metal shaders via `iAudio`, `iBass`, `iMid`, `iTreble`, and `iAmplitude` uniform parameters.
+  - Organic 120 BPM rhythmic fallback simulation if screen recording permission is withheld.
+- **Glassmorphic Desktop HUD & Widgets**:
+  - Native `NSVisualEffectView` HUD overlay anchored to desktop corners (`topRight`, `topLeft`, `bottomRight`, `bottomLeft`, `topCenter`).
+  - Customizable widgets: Live Time/Date, Mach host CPU/RAM & FPS telemetry badges, Now Playing card (Spotify & Apple Music), and a 16-band live spectrum visualizer.
+  - Click-through event passthrough: desktop icons underneath remain fully clickable.
 - **Intelligent Power & Environment Throttling**:
   - Automatically pauses when displays sleep or when the screen is locked (`com.apple.screenIsLocked`).
   - Automatically pauses or throttles (e.g. 60 FPS -> 30 FPS) when running on battery or when Low Power Mode is enabled.
   - Per-display window occlusion awareness (pauses playback when full-screen apps completely cover the desktop).
-- **Native Menu Bar Extra (`NSStatusItem`)**: Quick play/pause toggling, display picker, video selector, preferences, and clean quit without requiring an open window.
-- **Configurable CLI & JSON Persistence**: Run as a standalone daemon (`--headless`), pass custom video flags (`--video /path/to/video.mp4`), or persist settings via `~/.config/WallpaperEngineCore/config.json`.
+- **Native Menu Bar Extra (`NSStatusItem`)**: Quick controls for switching between Video, Parallax, and Shader engines; toggling HUD and Audio-Reactive modes; and selecting HUD positions.
+- **Configurable CLI & JSON Persistence**: Run as a standalone daemon (`--headless`), pass custom flags, or persist settings via `~/.config/WallpaperEngineCore/config.json`.
 
 ---
 
@@ -25,20 +41,38 @@ Sources/
 ├── WallpaperEngineApp/             # Native executable daemon entrypoint
 │   └── main.swift
 └── WallpaperEngineCore/            # Core engine framework
+    ├── Audio/                      # Audio-Reactive & Media capture
+    │   ├── AudioSpectrumAnalyzer.swift   # vDSP 1024-point FFT analyzer
+    │   ├── AudioSpectrumData.swift       # 16-band energy & SIMD4 uniforms
+    │   ├── NowPlayingMonitor.swift       # Spotify / Apple Music metadata
+    │   └── SystemAudioCapture.swift      # ScreenCaptureKit system audio tap
     ├── Coordinator/                # App lifecycle & CLI parsing
     │   ├── AppCoordinator.swift
     │   └── CommandLineOptions.swift
+    ├── HUD/                        # Glassmorphic desktop overlays
+    │   ├── DesktopHUDView.swift          # NSVisualEffectView widget panel
+    │   └── SystemTelemetryMonitor.swift  # Mach host CPU/RAM/FPS probes
     ├── MenuBar/                    # Status item & quick menu controls
     │   └── MenuBarController.swift
     ├── Models/                     # Domain state & Codable config
     │   ├── DisplayInfo.swift
     │   ├── EngineConfig.swift
     │   └── PlaybackState.swift
+    ├── Parallax/                   # AI 3D Parallax Scene Engine
+    │   ├── DepthEstimator.swift          # CoreML Depth Anything V2
+    │   ├── ParallaxMeshRenderer.swift    # Metal 3D vertex displacement
+    │   ├── ParallaxWallpaperView.swift   # MTKView layer
+    │   └── PointerParallaxDriver.swift   # Mouse/head pointer tracking
     ├── Power/                      # Power source & display environment observers
     │   ├── OcclusionManager.swift
     │   ├── PowerObserver.swift
     │   ├── SleepLockObserver.swift
     │   └── StateEvaluator.swift
+    ├── Shaders/                    # Real-Time Metal Procedural Shaders
+    │   ├── MetalShaderRenderer.swift     # Metal pipeline & shader compilation
+    │   ├── ProceduralShaderPreset.swift  # Aurora, Starfield, Bokeh, etc.
+    │   ├── ShaderWallpaperView.swift     # Real-time render MTKView
+    │   └── ShadertoyCompatibility.swift  # GLSL to MSL compatibility bridge
     ├── Video/                      # AVFoundation video looping & stall watchdog
     │   ├── AssetManager.swift
     │   ├── DisplayVideoPlayer.swift
@@ -51,7 +85,7 @@ Sources/
 
 Tests/
 ├── E2ETests/                       # Comprehensive E2E Test Suite (220 tests, Tiers 1–4)
-└── WallpaperEngineCoreTests/       # Unit & Adversarial Stress Probe Suites (206 tests)
+└── WallpaperEngineCoreTests/       # Unit & Adversarial Stress Probe Suites (233 tests)
 ```
 
 ---
@@ -61,6 +95,7 @@ Tests/
 ### Requirements
 - macOS 13.0 (Ventura) or newer
 - Swift 6.0+ toolchain (Xcode or Command Line Tools)
+- Apple Silicon (M1/M2/M3/M4) or Intel Mac with Metal support
 
 ### Build Release Binary
 ```bash
@@ -71,19 +106,36 @@ The executable is generated at:
 .build/release/WallpaperEngineApp
 ```
 
-### Run with a Custom Video
+### Quick Run Examples
+
+#### 1. Procedural Shader with Audio Reactivity & HUD
 ```bash
-./.build/release/WallpaperEngineApp --video /path/to/your/wallpaper.mp4
+./.build/release/WallpaperEngineApp --shader aurora --audio-reactive --hud --hud-position topRight
 ```
 
-### Run Headless (Daemon Mode)
+#### 2. Cyberpunk Grid at 1.5x Speed with Bottom-Left HUD
 ```bash
-./.build/release/WallpaperEngineApp --video /path/to/wallpaper.mp4 --headless
+./.build/release/WallpaperEngineApp --shader cyberpunkGrid --shader-speed 1.5 --hud --hud-position bottomLeft
 ```
 
-### Inspect Configuration
+#### 3. Custom Shadertoy / Metal Shader File
 ```bash
-./.build/release/WallpaperEngineApp --dump-config
+./.build/release/WallpaperEngineApp --shader-file /path/to/my_shader.metal --audio-reactive
+```
+
+#### 4. AI 3D Parallax Wallpaper from a 2D Photo
+```bash
+./.build/release/WallpaperEngineApp --parallax /path/to/photo.jpg
+```
+
+#### 5. Custom Looping Video Wallpaper
+```bash
+./.build/release/WallpaperEngineApp --video /path/to/wallpaper.mp4
+```
+
+#### 6. Headless Background Daemon
+```bash
+./.build/release/WallpaperEngineApp --shader starfield --headless
 ```
 
 ---
@@ -93,6 +145,18 @@ The executable is generated at:
 ```
 OPTIONS:
   --video <path>          Override default wallpaper asset path (MP4/MOV)
+  --shader <preset>       Activate procedural shader preset (aurora, starfield,
+                          gradientFlow, cyberpunkGrid, bokeh)
+  --shader-file <path>    Load custom Metal or Shadertoy shader source file
+  --shader-speed <speed>  Set shader animation speed multiplier (default: 1.0)
+  --parallax <path>       Activate AI 3D parallax photo wallpaper from 2D image
+  --no-parallax           Disable parallax mode
+  --audio-reactive        Enable ScreenCaptureKit audio-reactive visualizer
+  --no-audio-reactive     Disable audio reactivity
+  --hud                   Display glassmorphic desktop HUD & telemetry widgets
+  --no-hud                Disable desktop HUD
+  --hud-position <pos>    Set HUD anchor (topRight, topLeft, bottomRight,
+                          bottomLeft, topCenter)
   --display <id>          Target specific display ID for asset override (UInt32)
   --fps <rate>            Override target rendering frame rate (e.g. 30, 60, 120)
   --throttled-fps <rate>  Override power-throttled frame rate (e.g. 15, 30)
@@ -115,8 +179,8 @@ Run all test suites:
 # Run the 220 End-to-End tests
 swift test
 
-# Run the 206 Unit & Adversarial Challenger tests
+# Run the 233 Unit, Shader, Parallax, Audio, and HUD tests
 swift run WallpaperEngineCoreTests
 ```
 
-Both suites execute with **100% pass rate (426 / 426 tests passed)**, verifying window level hierarchy, memory management, zero-leak display tear-down, hardware acceleration, audio suppression, and power-state transitions.
+Both test suites execute with a **100% pass rate (453 / 453 tests passed)**, validating strict Swift 6 concurrency, Accelerate FFT calculations, Metal shader pipelines, ScreenCaptureKit audio streams, Mach host telemetry, and desktop window hierarchy.
