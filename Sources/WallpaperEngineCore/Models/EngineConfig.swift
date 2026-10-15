@@ -48,6 +48,12 @@ public struct EngineConfig: Codable, Equatable, Sendable {
     public var shaderPath: String?
     public var shaderSpeed: Float
 
+    // Desktop HUD & Glassmorphic Widgets
+    public var hudConfig: HUDConfig
+
+    // Audio-Reactive Visualizer
+    public var isAudioReactive: Bool
+
     // Per-display configurations (Key: Display Identifier UUID or CGDirectDisplayID string)
     public var displayConfigurations: [String: DisplayConfig]
 
@@ -74,6 +80,8 @@ public struct EngineConfig: Codable, Equatable, Sendable {
         shaderName: String? = nil,
         shaderPath: String? = nil,
         shaderSpeed: Float = 1.0,
+        hudConfig: HUDConfig = .init(),
+        isAudioReactive: Bool = true,
         displayConfigurations: [String: DisplayConfig] = [:]
     ) {
         self.version = version
@@ -97,6 +105,8 @@ public struct EngineConfig: Codable, Equatable, Sendable {
         self.shaderName = shaderName
         self.shaderPath = shaderPath
         self.shaderSpeed = max(0.01, shaderSpeed)
+        self.hudConfig = hudConfig
+        self.isAudioReactive = isAudioReactive
         self.displayConfigurations = displayConfigurations
     }
 
@@ -128,7 +138,72 @@ public struct EngineConfig: Codable, Equatable, Sendable {
         self.shaderPath = try container.decodeIfPresent(String.self, forKey: .shaderPath)
         self.shaderSpeed = try container.decodeIfPresent(Float.self, forKey: .shaderSpeed) ?? 1.0
 
+        self.hudConfig = try container.decodeIfPresent(HUDConfig.self, forKey: .hudConfig) ?? HUDConfig()
+        self.isAudioReactive = try container.decodeIfPresent(Bool.self, forKey: .isAudioReactive) ?? true
+
         self.displayConfigurations = try container.decodeIfPresent([String: DisplayConfig].self, forKey: .displayConfigurations) ?? [:]
+    }
+
+    // MARK: - Desktop HUD Configuration
+    public struct HUDConfig: Codable, Equatable, Sendable {
+        public var isEnabled: Bool
+        public var position: HUDPosition
+        public var showClock: Bool
+        public var showDate: Bool
+        public var showSystemStats: Bool
+        public var showNowPlaying: Bool
+        public var showAudioVisualizer: Bool
+        public var scale: Float
+
+        public enum HUDPosition: String, Codable, CaseIterable, Sendable {
+            case topRight
+            case topLeft
+            case bottomRight
+            case bottomLeft
+            case topCenter
+
+            public var displayName: String {
+                switch self {
+                case .topRight: return "Top Right"
+                case .topLeft: return "Top Left"
+                case .bottomRight: return "Bottom Right"
+                case .bottomLeft: return "Bottom Left"
+                case .topCenter: return "Top Center"
+                }
+            }
+        }
+
+        public init(
+            isEnabled: Bool = true,
+            position: HUDPosition = .topRight,
+            showClock: Bool = true,
+            showDate: Bool = true,
+            showSystemStats: Bool = true,
+            showNowPlaying: Bool = true,
+            showAudioVisualizer: Bool = true,
+            scale: Float = 1.0
+        ) {
+            self.isEnabled = isEnabled
+            self.position = position
+            self.showClock = showClock
+            self.showDate = showDate
+            self.showSystemStats = showSystemStats
+            self.showNowPlaying = showNowPlaying
+            self.showAudioVisualizer = showAudioVisualizer
+            self.scale = max(0.5, min(2.0, scale))
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            self.isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
+            self.position = try container.decodeIfPresent(HUDPosition.self, forKey: .position) ?? .topRight
+            self.showClock = try container.decodeIfPresent(Bool.self, forKey: .showClock) ?? true
+            self.showDate = try container.decodeIfPresent(Bool.self, forKey: .showDate) ?? true
+            self.showSystemStats = try container.decodeIfPresent(Bool.self, forKey: .showSystemStats) ?? true
+            self.showNowPlaying = try container.decodeIfPresent(Bool.self, forKey: .showNowPlaying) ?? true
+            self.showAudioVisualizer = try container.decodeIfPresent(Bool.self, forKey: .showAudioVisualizer) ?? true
+            self.scale = try container.decodeIfPresent(Float.self, forKey: .scale) ?? 1.0
+        }
     }
 
     public struct DisplayConfig: Codable, Equatable, Sendable {

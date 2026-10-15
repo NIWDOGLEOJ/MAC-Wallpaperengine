@@ -47,6 +47,8 @@ public protocol MenuBarControllerDelegate: AnyObject {
     func menuBar(_ controller: MenuBarControllerProtocol, didTogglePauseFor displayID: CGDirectDisplayID)
     func menuBar(_ controller: MenuBarControllerProtocol, didSelectShaderPreset preset: String, for displayID: CGDirectDisplayID?)
     func menuBar(_ controller: MenuBarControllerProtocol, didSelectShaderSpeed speed: Float)
+    func menuBar(_ controller: MenuBarControllerProtocol, didUpdateHUDConfig config: EngineConfig.HUDConfig)
+    func menuBar(_ controller: MenuBarControllerProtocol, didToggleAudioReactive enabled: Bool)
     func menuBarDidRequestRevealWallpapers(_ controller: MenuBarControllerProtocol)
     func menuBarDidRequestQuit(_ controller: MenuBarControllerProtocol)
 }
@@ -59,6 +61,8 @@ extension MenuBarControllerDelegate {
     public func menuBar(_ controller: MenuBarControllerProtocol, didTogglePauseFor displayID: CGDirectDisplayID) {}
     public func menuBar(_ controller: MenuBarControllerProtocol, didSelectShaderPreset preset: String, for displayID: CGDirectDisplayID?) {}
     public func menuBar(_ controller: MenuBarControllerProtocol, didSelectShaderSpeed speed: Float) {}
+    public func menuBar(_ controller: MenuBarControllerProtocol, didUpdateHUDConfig config: EngineConfig.HUDConfig) {}
+    public func menuBar(_ controller: MenuBarControllerProtocol, didToggleAudioReactive enabled: Bool) {}
     public func menuBarDidRequestRevealWallpapers(_ controller: MenuBarControllerProtocol) {}
     public func menuBarDidRequestQuit(_ controller: MenuBarControllerProtocol) {}
 }
@@ -222,6 +226,16 @@ public final class MenuBarController: NSObject, MenuBarControllerProtocol, NSMen
     private var shaderPresetItems: [String: NSMenuItem] = [:]
     private var shaderSpeedItems: [Float: NSMenuItem] = [:]
 
+    // Desktop HUD & Audio Reactive menu item references
+    private var hudSubmenu: NSMenu?
+    private var enableHUDItem: NSMenuItem?
+    private var hudPositionItems: [EngineConfig.HUDConfig.HUDPosition: NSMenuItem] = [:]
+    private var showClockItem: NSMenuItem?
+    private var showStatsItem: NSMenuItem?
+    private var showNowPlayingItem: NSMenuItem?
+    private var showSpectrumItem: NSMenuItem?
+    private var audioReactiveItem: NSMenuItem?
+
     // Public accessors for test inspection
     public var rootMenuInstance: NSMenu { rootMenu }
     public var cachedStatusHeaderItem: NSMenuItem? { statusHeaderItem }
@@ -229,6 +243,8 @@ public final class MenuBarController: NSObject, MenuBarControllerProtocol, NSMen
     public var cachedDisplaysSubmenu: NSMenu? { displaysSubmenu }
     public var cachedPreferencesSubmenu: NSMenu? { preferencesSubmenu }
     public var cachedShadersSubmenu: NSMenu? { shadersSubmenu }
+    public var cachedHUDSubmenu: NSMenu? { hudSubmenu }
+    public var cachedAudioReactiveItem: NSMenuItem? { audioReactiveItem }
 
     public init(
         isHeadless: Bool = false,
@@ -384,7 +400,18 @@ public final class MenuBarController: NSObject, MenuBarControllerProtocol, NSMen
 
         rootMenu.addItem(.separator())
 
-        // 5. Preferences Submenu
+        // 5. Desktop HUD & Widgets Submenu
+        let hudMenu = NSMenu(title: "Desktop HUD & Widgets")
+        hudMenu.autoenablesItems = false
+        buildHUDSubmenu(hudMenu)
+        let hudParentItem = NSMenuItem(title: "Desktop HUD & Widgets", action: nil, keyEquivalent: "")
+        hudParentItem.submenu = hudMenu
+        rootMenu.addItem(hudParentItem)
+        self.hudSubmenu = hudMenu
+
+        rootMenu.addItem(.separator())
+
+        // 6. Preferences Submenu
         let prefMenu = NSMenu(title: "Preferences")
         prefMenu.autoenablesItems = false
         buildPreferencesSubmenu(prefMenu)
@@ -489,6 +516,61 @@ public final class MenuBarController: NSObject, MenuBarControllerProtocol, NSMen
         let speedParent = NSMenuItem(title: "Shader Speed", action: nil, keyEquivalent: "")
         speedParent.submenu = speedMenu
         menu.addItem(speedParent)
+    }
+
+    private func buildHUDSubmenu(_ menu: NSMenu) {
+        menu.removeAllItems()
+        hudPositionItems.removeAll()
+
+        let toggleHUD = NSMenuItem(title: "Enable Desktop HUD", action: #selector(handleToggleHUDClicked(_:)), keyEquivalent: "")
+        toggleHUD.target = self
+        menu.addItem(toggleHUD)
+        self.enableHUDItem = toggleHUD
+
+        menu.addItem(.separator())
+
+        // Position Submenu
+        let posMenu = NSMenu(title: "HUD Position")
+        posMenu.autoenablesItems = false
+        for pos in EngineConfig.HUDConfig.HUDPosition.allCases {
+            let item = NSMenuItem(title: pos.displayName, action: #selector(handleSelectHUDPosition(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = pos.rawValue
+            posMenu.addItem(item)
+            hudPositionItems[pos] = item
+        }
+        let posParent = NSMenuItem(title: "HUD Position", action: nil, keyEquivalent: "")
+        posParent.submenu = posMenu
+        menu.addItem(posParent)
+
+        menu.addItem(.separator())
+
+        let clockItem = NSMenuItem(title: "Clock & Date", action: #selector(handleToggleClockClicked(_:)), keyEquivalent: "")
+        clockItem.target = self
+        menu.addItem(clockItem)
+        self.showClockItem = clockItem
+
+        let statsItem = NSMenuItem(title: "System Stats (CPU/RAM/FPS)", action: #selector(handleToggleStatsClicked(_:)), keyEquivalent: "")
+        statsItem.target = self
+        menu.addItem(statsItem)
+        self.showStatsItem = statsItem
+
+        let npItem = NSMenuItem(title: "Now Playing Track", action: #selector(handleToggleNowPlayingClicked(_:)), keyEquivalent: "")
+        npItem.target = self
+        menu.addItem(npItem)
+        self.showNowPlayingItem = npItem
+
+        let specItem = NSMenuItem(title: "Audio Spectrum Bars", action: #selector(handleToggleSpectrumClicked(_:)), keyEquivalent: "")
+        specItem.target = self
+        menu.addItem(specItem)
+        self.showSpectrumItem = specItem
+
+        menu.addItem(.separator())
+
+        let audioItem = NSMenuItem(title: "Audio-Reactive Pulse", action: #selector(handleToggleAudioReactiveClicked(_:)), keyEquivalent: "")
+        audioItem.target = self
+        menu.addItem(audioItem)
+        self.audioReactiveItem = audioItem
     }
 
     private func buildPreferencesSubmenu(_ menu: NSMenu) {
@@ -625,9 +707,71 @@ public final class MenuBarController: NSObject, MenuBarControllerProtocol, NSMen
         for (sp, item) in shaderSpeedItems {
             item.state = (abs(config.shaderSpeed - sp) < 0.05) ? .on : .off
         }
+
+        enableHUDItem?.state = config.hudConfig.isEnabled ? .on : .off
+        showClockItem?.state = config.hudConfig.showClock ? .on : .off
+        showStatsItem?.state = config.hudConfig.showSystemStats ? .on : .off
+        showNowPlayingItem?.state = config.hudConfig.showNowPlaying ? .on : .off
+        showSpectrumItem?.state = config.hudConfig.showAudioVisualizer ? .on : .off
+        audioReactiveItem?.state = config.isAudioReactive ? .on : .off
+
+        for (pos, item) in hudPositionItems {
+            item.state = (config.hudConfig.position == pos) ? .on : .off
+        }
     }
 
     // MARK: - Action Handlers
+
+    @objc public func handleToggleHUDClicked(_ sender: Any?) {
+        currentConfig.hudConfig.isEnabled.toggle()
+        updateConfig(currentConfig)
+        delegate?.menuBar(self, didUpdateHUDConfig: currentConfig.hudConfig)
+        delegate?.menuBar(self, didUpdateConfig: currentConfig)
+    }
+
+    @objc public func handleSelectHUDPosition(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let pos = EngineConfig.HUDConfig.HUDPosition(rawValue: raw) else { return }
+        currentConfig.hudConfig.position = pos
+        updateConfig(currentConfig)
+        delegate?.menuBar(self, didUpdateHUDConfig: currentConfig.hudConfig)
+        delegate?.menuBar(self, didUpdateConfig: currentConfig)
+    }
+
+    @objc public func handleToggleClockClicked(_ sender: Any?) {
+        currentConfig.hudConfig.showClock.toggle()
+        updateConfig(currentConfig)
+        delegate?.menuBar(self, didUpdateHUDConfig: currentConfig.hudConfig)
+        delegate?.menuBar(self, didUpdateConfig: currentConfig)
+    }
+
+    @objc public func handleToggleStatsClicked(_ sender: Any?) {
+        currentConfig.hudConfig.showSystemStats.toggle()
+        updateConfig(currentConfig)
+        delegate?.menuBar(self, didUpdateHUDConfig: currentConfig.hudConfig)
+        delegate?.menuBar(self, didUpdateConfig: currentConfig)
+    }
+
+    @objc public func handleToggleNowPlayingClicked(_ sender: Any?) {
+        currentConfig.hudConfig.showNowPlaying.toggle()
+        updateConfig(currentConfig)
+        delegate?.menuBar(self, didUpdateHUDConfig: currentConfig.hudConfig)
+        delegate?.menuBar(self, didUpdateConfig: currentConfig)
+    }
+
+    @objc public func handleToggleSpectrumClicked(_ sender: Any?) {
+        currentConfig.hudConfig.showAudioVisualizer.toggle()
+        updateConfig(currentConfig)
+        delegate?.menuBar(self, didUpdateHUDConfig: currentConfig.hudConfig)
+        delegate?.menuBar(self, didUpdateConfig: currentConfig)
+    }
+
+    @objc public func handleToggleAudioReactiveClicked(_ sender: Any?) {
+        currentConfig.isAudioReactive.toggle()
+        updateConfig(currentConfig)
+        delegate?.menuBar(self, didToggleAudioReactive: currentConfig.isAudioReactive)
+        delegate?.menuBar(self, didUpdateConfig: currentConfig)
+    }
 
     @objc public func handlePlayPauseClicked(_ sender: Any?) {
         delegate?.menuBarDidTogglePlayback(self)

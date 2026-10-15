@@ -42,6 +42,9 @@ await ParallaxTests.runAllTests()
 // --- Real-Time Metal Procedural Shader Suites ---
 await ShaderTests.runAllTests()
 
+// --- Audio-Reactive Visualizer & Desktop HUD Suites ---
+await AudioHUDTests.runAllTests()
+
 // Conclude and return POSIX exit code (0 on success, 1 on failure)
 let exitCode = TestRunner.shared.printSummary()
 exit(exitCode)

@@ -145,6 +145,12 @@ public final class MetalShaderRenderer: NSObject, MTKViewDelegate, @unchecked Se
         lock.unlock()
     }
 
+    public func updateAudio(spectrum: AudioSpectrumData) {
+        lock.lock()
+        customParams = spectrum.asSIMD4
+        lock.unlock()
+    }
+
     // MARK: - MTKViewDelegate
 
     public func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {

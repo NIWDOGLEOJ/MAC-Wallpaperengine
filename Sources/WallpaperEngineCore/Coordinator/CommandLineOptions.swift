@@ -35,6 +35,11 @@ public struct CommandLineOptions: Equatable, Sendable {
     public var shaderPath: String?
     public var shaderSpeed: Float?
 
+    // Desktop HUD & Audio Reactive Options
+    public var isHUDEnabled: Bool?
+    public var hudPosition: EngineConfig.HUDConfig.HUDPosition?
+    public var isAudioReactive: Bool?
+
     // Convenience aliases
     public var displayID: CGDirectDisplayID? {
         get { targetDisplayID }
@@ -65,6 +70,9 @@ public struct CommandLineOptions: Equatable, Sendable {
         shaderName: String? = nil,
         shaderPath: String? = nil,
         shaderSpeed: Float? = nil,
+        isHUDEnabled: Bool? = nil,
+        hudPosition: EngineConfig.HUDConfig.HUDPosition? = nil,
+        isAudioReactive: Bool? = nil,
         targetDisplayID: CGDirectDisplayID? = nil,
         displayID: CGDirectDisplayID? = nil,
         targetFPS: Int? = nil,
@@ -90,6 +98,9 @@ public struct CommandLineOptions: Equatable, Sendable {
         self.shaderName = shaderName
         self.shaderPath = shaderPath
         self.shaderSpeed = shaderSpeed
+        self.isHUDEnabled = isHUDEnabled
+        self.hudPosition = hudPosition
+        self.isAudioReactive = isAudioReactive
         self.targetDisplayID = targetDisplayID ?? displayID
         let resolvedFPS = targetFPS ?? targetFrameRate
         self.targetFPS = resolvedFPS.flatMap { $0 > 0 ? $0 : nil }
@@ -298,6 +309,32 @@ public struct CommandLineOptions: Equatable, Sendable {
                     idx += 1
                 }
 
+            case "--hud":
+                options.isHUDEnabled = true
+                idx += 1
+
+            case "--no-hud":
+                options.isHUDEnabled = false
+                idx += 1
+
+            case "--hud-position":
+                if idx + 1 < tokens.count && !isFlag(tokens[idx + 1]) {
+                    let val = tokens[idx + 1]
+                    options.hudPosition = EngineConfig.HUDConfig.HUDPosition(rawValue: val)
+                    idx += 2
+                } else {
+                    unknown.append(token)
+                    idx += 1
+                }
+
+            case "--audio-reactive":
+                options.isAudioReactive = true
+                idx += 1
+
+            case "--no-audio-reactive":
+                options.isAudioReactive = false
+                idx += 1
+
             default:
                 unknown.append(token)
                 idx += 1
@@ -368,6 +405,16 @@ public struct CommandLineOptions: Equatable, Sendable {
             }
         case "--config":
             options.configPath = value.isEmpty ? nil : value
+        case "--hud":
+            options.isHUDEnabled = (value.lowercased() != "false" && value != "0")
+        case "--no-hud":
+            options.isHUDEnabled = false
+        case "--hud-position":
+            options.hudPosition = EngineConfig.HUDConfig.HUDPosition(rawValue: value)
+        case "--audio-reactive":
+            options.isAudioReactive = (value.lowercased() != "false" && value != "0")
+        case "--no-audio-reactive":
+            options.isAudioReactive = false
         default:
             unknown.append("\(flag)=\(value)")
         }
@@ -436,6 +483,15 @@ public struct CommandLineOptions: Equatable, Sendable {
         if let focal = focalDepth {
             config.focalDepth = focal
         }
+        if let hud = isHUDEnabled {
+            config.hudConfig.isEnabled = hud
+        }
+        if let pos = hudPosition {
+            config.hudConfig.position = pos
+        }
+        if let audio = isAudioReactive {
+            config.isAudioReactive = audio
+        }
     }
 
     public static var versionString: String {
@@ -454,6 +510,11 @@ public struct CommandLineOptions: Equatable, Sendable {
           --photo <path>          Set 2D photo path to infer depth and render as 3D parallax
           --shader <name|path>    Load procedural preset (aurora, starfield, gradientFlow, cyberpunkGrid, bokeh) or custom shader path (.metal, .shadertoy)
           --shader-speed <speed>  Set procedural shader animation speed multiplier (e.g. 0.5, 1.0, 2.0)
+          --hud                   Enable glassmorphic desktop HUD (Clock, Stats, Now Playing, Spectrum)
+          --no-hud                Disable desktop HUD overlays
+          --hud-position <pos>    Set HUD anchor (topRight, topLeft, bottomRight, bottomLeft, topCenter)
+          --audio-reactive        Enable CoreAudio spectrum analysis for shaders and visualizer
+          --no-audio-reactive     Disable audio reactivity
           --head-tracking         Enable webcam head tracking for perspective parallax
           --depth <intensity>     Set 3D parallax depth intensity (default: 0.04)
           --focal <depth>         Set 3D parallax focal plane (default: 0.5)

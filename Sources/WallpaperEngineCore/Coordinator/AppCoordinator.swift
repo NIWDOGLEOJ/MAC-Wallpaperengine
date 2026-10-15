@@ -24,11 +24,21 @@ public protocol AppCoordinatorProtocol: AnyObject {
     var menuBarController: MenuBarControllerProtocol? { get }
     var lastDecisions: [CGDirectDisplayID: PlaybackDecision] { get }
 
+    var parallaxViews: [CGDirectDisplayID: ParallaxWallpaperView] { get }
+    var shaderViews: [CGDirectDisplayID: ShaderWallpaperView] { get }
+    var hudViews: [CGDirectDisplayID: DesktopHUDView] { get }
+    var audioCapture: SystemAudioCapture { get }
+    var nowPlayingMonitor: NowPlayingMonitor { get }
+    var telemetryMonitor: SystemTelemetryMonitor { get }
+
     func start()
     func stop()
     func togglePlayback()
     func setVideo(url: URL, for displayID: CGDirectDisplayID?) async throws
     func setPhoto(url: URL, for displayID: CGDirectDisplayID?, useHeadTracking: Bool?) async throws
+    func setShader(preset: ProceduralShaderPreset, for displayID: CGDirectDisplayID?, speed: Float?)
+    func setShader(url: URL, for displayID: CGDirectDisplayID?, speed: Float?)
+    func attachOrUpdateHUD(for displayID: CGDirectDisplayID, in window: DesktopWindowProtocol)
     func updateConfig(_ update: (inout EngineConfig) -> Void)
     func reconcileAllScreens()
     func flushConfigToDisk()
@@ -60,6 +70,10 @@ public final class AppCoordinator: NSObject,
     private var attachedWindows: [CGDirectDisplayID: DesktopWindowProtocol] = [:]
     public private(set) var parallaxViews: [CGDirectDisplayID: ParallaxWallpaperView] = [:]
     public private(set) var shaderViews: [CGDirectDisplayID: ShaderWallpaperView] = [:]
+    public private(set) var hudViews: [CGDirectDisplayID: DesktopHUDView] = [:]
+    public let audioCapture: SystemAudioCapture
+    public let nowPlayingMonitor: NowPlayingMonitor
+    public let telemetryMonitor: SystemTelemetryMonitor
     private let configStorage: ConfigStorageProtocol
     private var configSaveTask: Task<Void, Never>?
     public let isHeadless: Bool
@@ -77,6 +91,9 @@ public final class AppCoordinator: NSObject,
         sleepLockObserver: SleepLockObserverProtocol = SleepLockObserver(),
         occlusionManager: OcclusionManagerProtocol = OcclusionManager(),
         menuBarController: MenuBarControllerProtocol? = nil,
+        audioCapture: SystemAudioCapture = SystemAudioCapture(),
+        nowPlayingMonitor: NowPlayingMonitor = NowPlayingMonitor(),
+        telemetryMonitor: SystemTelemetryMonitor = SystemTelemetryMonitor(),
         cliOptions: CommandLineOptions? = nil
     ) {
         var resolvedConfig = config ?? configStorage.load() ?? EngineConfig.default
@@ -93,6 +110,9 @@ public final class AppCoordinator: NSObject,
         self.powerObserver = powerObserver
         self.sleepLockObserver = sleepLockObserver
         self.occlusionManager = occlusionManager
+        self.audioCapture = audioCapture
+        self.nowPlayingMonitor = nowPlayingMonitor
+        self.telemetryMonitor = telemetryMonitor
         self.currentPowerState = powerObserver.currentState
         self.currentSleepLockState = sleepLockObserver.currentState
 
@@ -116,6 +136,45 @@ public final class AppCoordinator: NSObject,
         self.occlusionManager.delegate = self
         self.videoEngine.delegate = self
         self.menuBarController?.delegate = self
+
+        // Wire Audio & Telemetry Callbacks
+        self.audioCapture.onSpectrumUpdate = { [weak self] spectrum in
+            Task { @MainActor [weak self] in
+                guard let self = self, self.isRunning else { return }
+                if self.config.isAudioReactive {
+                    for sView in self.shaderViews.values {
+                        sView.updateAudio(spectrum: spectrum)
+                    }
+                }
+                if self.config.hudConfig.isEnabled && self.config.hudConfig.showAudioVisualizer {
+                    for hView in self.hudViews.values {
+                        hView.updateSpectrum(spectrum)
+                    }
+                }
+            }
+        }
+
+        self.telemetryMonitor.onTelemetryUpdate = { [weak self] telemetry in
+            Task { @MainActor [weak self] in
+                guard let self = self, self.isRunning else { return }
+                if self.config.hudConfig.isEnabled && self.config.hudConfig.showSystemStats {
+                    for hView in self.hudViews.values {
+                        hView.updateTelemetry(telemetry)
+                    }
+                }
+            }
+        }
+
+        self.nowPlayingMonitor.onNowPlayingChange = { [weak self] info in
+            Task { @MainActor [weak self] in
+                guard let self = self, self.isRunning else { return }
+                if self.config.hudConfig.isEnabled && self.config.hudConfig.showNowPlaying {
+                    for hView in self.hudViews.values {
+                        hView.updateNowPlaying(info)
+                    }
+                }
+            }
+        }
     }
 
     // MARK: - Lifecycle
@@ -148,7 +207,12 @@ public final class AppCoordinator: NSObject,
         self.currentPowerState = powerObserver.currentState
         self.currentSleepLockState = sleepLockObserver.currentState
 
-        // 6. Perform initial state reconciliation & populate Menu Bar displays
+        // 6. Start Audio Capture, Media & Telemetry Monitors
+        audioCapture.start()
+        nowPlayingMonitor.start()
+        telemetryMonitor.start()
+
+        // 7. Perform initial state reconciliation & populate Menu Bar displays
         reconcileAllScreens()
         refreshMenuBarDisplays()
         logger.info("AppCoordinator started successfully with \(self.windowManager.managedWindows.count) displays.")
@@ -163,13 +227,18 @@ public final class AppCoordinator: NSObject,
         powerObserver.stop()
         sleepLockObserver.stop()
 
-        // 2. Flush pending config persistence synchronously
+        // 2. Halt audio & telemetry monitors
+        audioCapture.stop()
+        nowPlayingMonitor.stop()
+        telemetryMonitor.stop()
+
+        // 3. Flush pending config persistence synchronously
         flushConfigToDisk()
 
-        // 3. Tear down Menu Bar UI
+        // 4. Tear down Menu Bar UI
         menuBarController?.stop()
 
-        // 4. Tear down video players and windows
+        // 5. Tear down video players and windows
         videoEngine.stop()
         windowManager.stop()
 
@@ -185,7 +254,12 @@ public final class AppCoordinator: NSObject,
         }
         shaderViews.removeAll()
 
-        // 5. Reset cached decisions
+        for (_, hView) in hudViews {
+            hView.removeFromSuperview()
+        }
+        hudViews.removeAll()
+
+        // 6. Reset cached decisions
         activeDisplayIDs.removeAll()
         attachedWindows.removeAll()
         lastDecisions.removeAll()
@@ -207,10 +281,12 @@ public final class AppCoordinator: NSObject,
 
         if let sName = shaderName, let preset = ProceduralShaderPreset(rawValue: sName) {
             attachShader(to: window, displayID: displayID, preset: preset)
+            attachOrUpdateHUD(for: displayID, in: window)
             return
         } else if let sPath = shaderPath, FileManager.default.fileExists(atPath: sPath) {
             let sURL = URL(fileURLWithPath: sPath)
             attachShader(to: window, displayID: displayID, fileURL: sURL)
+            attachOrUpdateHUD(for: displayID, in: window)
             return
         }
 
@@ -219,6 +295,7 @@ public final class AppCoordinator: NSObject,
         if let pPath = photoPath, FileManager.default.fileExists(atPath: pPath) {
             let pURL = URL(fileURLWithPath: pPath)
             attachParallax(to: window, displayID: displayID, photoURL: pURL)
+            attachOrUpdateHUD(for: displayID, in: window)
             return
         }
 
@@ -234,6 +311,32 @@ public final class AppCoordinator: NSObject,
                 try? await self?.videoEngine.setVideo(url: url, for: displayID)
             }
         }
+
+        // 4. Attach or update Desktop HUD overlay
+        attachOrUpdateHUD(for: displayID, in: window)
+    }
+
+    public func attachOrUpdateHUD(for displayID: CGDirectDisplayID, in window: DesktopWindowProtocol) {
+        guard config.hudConfig.isEnabled else {
+            hudViews[displayID]?.removeFromSuperview()
+            hudViews.removeValue(forKey: displayID)
+            return
+        }
+
+        let hudView: DesktopHUDView
+        if let existing = hudViews[displayID] {
+            hudView = existing
+        } else {
+            hudView = DesktopHUDView(frame: .zero)
+            hudViews[displayID] = hudView
+        }
+
+        hudView.applyConfig(config.hudConfig)
+        let bounds = window.underlyingWindow.contentView?.bounds ?? window.frame
+        hudView.updatePlacement(in: bounds)
+
+        // Always ensure HUD is frontmost in window's contentView
+        window.underlyingWindow.contentView?.addSubview(hudView)
     }
 
     private func attachShader(to window: DesktopWindowProtocol, displayID: CGDirectDisplayID, preset: ProceduralShaderPreset) {
@@ -258,6 +361,10 @@ public final class AppCoordinator: NSObject,
             logger.info("Procedural shader '\(preset.displayName)' attached to display \(displayID)")
         } catch {
             logger.error("Failed to load procedural preset '\(preset.displayName)': \(error.localizedDescription)")
+        }
+
+        if let hView = hudViews[displayID] {
+            window.underlyingWindow.contentView?.addSubview(hView)
         }
     }
 
@@ -284,6 +391,10 @@ public final class AppCoordinator: NSObject,
         } catch {
             logger.error("Failed to load custom shader from \(fileURL.path): \(error.localizedDescription)")
         }
+
+        if let hView = hudViews[displayID] {
+            window.underlyingWindow.contentView?.addSubview(hView)
+        }
     }
 
     private func attachParallax(to window: DesktopWindowProtocol, displayID: CGDirectDisplayID, photoURL: URL) {
@@ -308,6 +419,10 @@ public final class AppCoordinator: NSObject,
 
         window.underlyingWindow.contentView?.addSubview(parallaxView)
         parallaxViews[displayID] = parallaxView
+
+        if let hView = hudViews[displayID] {
+            window.underlyingWindow.contentView?.addSubview(hView)
+        }
 
         Task { @MainActor [weak self] in
             do {
@@ -351,6 +466,7 @@ public final class AppCoordinator: NSObject,
     private func apply(decision: PlaybackDecision, to displayID: CGDirectDisplayID) {
         switch decision {
         case .play(let fps):
+            telemetryMonitor.currentFPS = fps
             videoEngine.setPlaybackState(.playing, for: displayID)
             if let pView = parallaxViews[displayID] {
                 pView.resume()
@@ -361,11 +477,13 @@ public final class AppCoordinator: NSObject,
                 sView.setTargetFrameRate(fps)
             }
         case .pause(let reasons):
+            telemetryMonitor.currentFPS = 0
             let primaryReason = reasons.sorted(by: { $0.rawValue < $1.rawValue }).first ?? .userRequested
             videoEngine.setPlaybackState(.paused(reason: primaryReason), for: displayID)
             parallaxViews[displayID]?.pause()
             shaderViews[displayID]?.pause()
         case .throttle(let fps, _):
+            telemetryMonitor.currentFPS = fps
             videoEngine.setPlaybackState(.throttled(fps: fps), for: displayID)
             if let pView = parallaxViews[displayID] {
                 pView.resume()
@@ -570,6 +688,9 @@ public final class AppCoordinator: NSObject,
     public func updateConfig(_ update: (inout EngineConfig) -> Void) {
         update(&config)
         menuBarController?.updateConfig(config)
+        for (id, window) in attachedWindows {
+            attachOrUpdateHUD(for: id, in: window)
+        }
         reconcileAllScreens()
         scheduleConfigSave()
     }
@@ -647,6 +768,10 @@ public final class AppCoordinator: NSObject,
             pView.removeFromSuperview()
             parallaxViews.removeValue(forKey: displayID)
         }
+        if let hView = hudViews[displayID] {
+            hView.removeFromSuperview()
+            hudViews.removeValue(forKey: displayID)
+        }
         activeDisplayIDs.remove(displayID)
         attachedWindows.removeValue(forKey: displayID)
         lastDecisions.removeValue(forKey: displayID)
@@ -657,6 +782,10 @@ public final class AppCoordinator: NSObject,
     }
 
     public func desktopWindowManager(_ manager: DesktopWindowManagerProtocol, didUpdateWindow window: DesktopWindowProtocol, for displayID: CGDirectDisplayID) {
+        if let hudView = hudViews[displayID] {
+            let bounds = window.underlyingWindow.contentView?.bounds ?? window.frame
+            hudView.updatePlacement(in: bounds)
+        }
         reconcileAllScreens()
         refreshMenuBarDisplays()
     }
@@ -727,6 +856,18 @@ public final class AppCoordinator: NSObject,
             var disp = cfg.displayConfigurations[key] ?? DisplayConfig()
             disp.isEnabled.toggle()
             cfg.displayConfigurations[key] = disp
+        }
+    }
+
+    public func menuBar(_ controller: MenuBarControllerProtocol, didUpdateHUDConfig hudConfig: EngineConfig.HUDConfig) {
+        updateConfig { cfg in
+            cfg.hudConfig = hudConfig
+        }
+    }
+
+    public func menuBar(_ controller: MenuBarControllerProtocol, didToggleAudioReactive enabled: Bool) {
+        updateConfig { cfg in
+            cfg.isAudioReactive = enabled
         }
     }
 

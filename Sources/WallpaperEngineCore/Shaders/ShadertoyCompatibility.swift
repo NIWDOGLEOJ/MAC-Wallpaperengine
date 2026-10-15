@@ -89,6 +89,13 @@ public struct ShadertoyCompatibility: Sendable {
 
     #define dFdx(x) dfdx(x)
     #define dFdy(x) dfdy(x)
+
+    // Audio-Reactive Visualizer Uniforms
+    #define iAudio (uniforms.customParams)
+    #define iBass (uniforms.customParams.x)
+    #define iMid (uniforms.customParams.y)
+    #define iTreble (uniforms.customParams.z)
+    #define iAmplitude (uniforms.customParams.w)
     """
 
     /// Determines the input shader type.
@@ -154,6 +161,13 @@ public struct ShadertoyCompatibility: Sendable {
             int iFrame;
             vec4 iMouse;
             vec4 iDate;
+            // Audio uniforms stored with underscore prefix to avoid
+            // collision with the #define macros in the preamble.
+            vec4 _iAudio;
+            float _iBass;
+            float _iMid;
+            float _iTreble;
+            float _iAmplitude;
 
             ShadertoySandbox(constant ShaderUniforms &u) :
                 uniforms(u),
@@ -162,7 +176,12 @@ public struct ShadertoyCompatibility: Sendable {
                 iTimeDelta(u.timeDelta),
                 iFrame(int(u.frameIndex)),
                 iMouse(u.mouse),
-                iDate(u.date) {}
+                iDate(u.date),
+                _iAudio(u.customParams),
+                _iBass(u.customParams.x),
+                _iMid(u.customParams.y),
+                _iTreble(u.customParams.z),
+                _iAmplitude(u.customParams.w) {}
 
             // --- User Shadertoy Source ---
             \(sanitized)

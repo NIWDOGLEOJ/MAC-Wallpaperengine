@@ -153,4 +153,9 @@ public final class ShaderWallpaperView: NSView {
         renderer?.resume()
         mtkView?.isPaused = false
     }
+
+    /// Feeds live audio spectrum data into the shader uniform buffer.
+    public func updateAudio(spectrum: AudioSpectrumData) {
+        renderer?.updateAudio(spectrum: spectrum)
+    }
 }
