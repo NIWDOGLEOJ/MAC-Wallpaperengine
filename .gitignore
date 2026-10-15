@@ -1,0 +1,24 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+
+# Xcode & Swift Package Manager
+.build/
+.swiftpm/
+*.xcodeproj/
+DerivedData/
+Packages/
+
+# Teamwork Multi-Agent Internal Directory
+.agents/
+
+# Compiled probe binaries (keep .swift sources if needed)
+probe_m1_it2_deallocation
+probe_m1_it2_stress
+probe_m1_window
+probe_m2_watchdog_multidisplay
+*.o
+*.dylib
+*.out
