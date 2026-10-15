@@ -644,8 +644,8 @@ public final class MenuBarController: NSObject, MenuBarControllerProtocol, NSMen
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
-        panel.allowedContentTypes = [.movie, .mpeg4Movie, .quickTimeMovie]
-        panel.title = (displayID != nil) ? "Choose Wallpaper for Display \(displayID!)" : "Choose Wallpaper for All Displays"
+        panel.allowedContentTypes = [.movie, .mpeg4Movie, .quickTimeMovie, .image, .jpeg, .png, .heic]
+        panel.title = (displayID != nil) ? "Choose Wallpaper (Video or 3D Photo) for Display \(displayID!)" : "Choose Wallpaper (Video or 3D Photo) for All Displays"
         panel.prompt = "Set Wallpaper"
 
         let response = panel.runModal()

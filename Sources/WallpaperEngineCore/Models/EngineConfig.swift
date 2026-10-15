@@ -37,6 +37,12 @@ public struct EngineConfig: Codable, Equatable, Sendable {
     public var hardwareDecodingEnabled: Bool
     public var defaultAssetPath: String?
 
+    // 3D Parallax Photo Scene Settings
+    public var photoPath: String?
+    public var useHeadTracking: Bool
+    public var depthIntensity: Float
+    public var focalDepth: Float
+
     // Per-display configurations (Key: Display Identifier UUID or CGDirectDisplayID string)
     public var displayConfigurations: [String: DisplayConfig]
 
@@ -56,6 +62,10 @@ public struct EngineConfig: Codable, Equatable, Sendable {
         isMuted: Bool = true,
         hardwareDecodingEnabled: Bool = true,
         defaultAssetPath: String? = nil,
+        photoPath: String? = nil,
+        useHeadTracking: Bool = false,
+        depthIntensity: Float = 0.04,
+        focalDepth: Float = 0.5,
         displayConfigurations: [String: DisplayConfig] = [:]
     ) {
         self.version = version
@@ -72,11 +82,43 @@ public struct EngineConfig: Codable, Equatable, Sendable {
         self.isMuted = isMuted
         self.hardwareDecodingEnabled = hardwareDecodingEnabled
         self.defaultAssetPath = defaultAssetPath
+        self.photoPath = photoPath
+        self.useHeadTracking = useHeadTracking
+        self.depthIntensity = depthIntensity
+        self.focalDepth = focalDepth
         self.displayConfigurations = displayConfigurations
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.version = try container.decodeIfPresent(Int.self, forKey: .version) ?? 1
+        self.isPaused = try container.decodeIfPresent(Bool.self, forKey: .isPaused) ?? false
+        let target = try container.decodeIfPresent(Int.self, forKey: .targetFrameRate) ?? 60
+        self.targetFrameRate = max(1, target)
+        let throttled = try container.decodeIfPresent(Int.self, forKey: .throttledFrameRate) ?? 30
+        self.throttledFrameRate = max(1, min(throttled, self.targetFrameRate))
+
+        self.pauseOnBattery = try container.decodeIfPresent(Bool.self, forKey: .pauseOnBattery) ?? false
+        self.throttleOnBattery = try container.decodeIfPresent(Bool.self, forKey: .throttleOnBattery) ?? true
+        self.pauseOnLowPowerMode = try container.decodeIfPresent(Bool.self, forKey: .pauseOnLowPowerMode) ?? true
+        self.pauseOnScreenLock = try container.decodeIfPresent(Bool.self, forKey: .pauseOnScreenLock) ?? true
+        self.pauseOnDisplaySleep = try container.decodeIfPresent(Bool.self, forKey: .pauseOnDisplaySleep) ?? true
+        self.pauseWhenOccluded = try container.decodeIfPresent(Bool.self, forKey: .pauseWhenOccluded) ?? true
+        self.isMuted = try container.decodeIfPresent(Bool.self, forKey: .isMuted) ?? true
+        self.hardwareDecodingEnabled = try container.decodeIfPresent(Bool.self, forKey: .hardwareDecodingEnabled) ?? true
+        self.defaultAssetPath = try container.decodeIfPresent(String.self, forKey: .defaultAssetPath)
+
+        self.photoPath = try container.decodeIfPresent(String.self, forKey: .photoPath)
+        self.useHeadTracking = try container.decodeIfPresent(Bool.self, forKey: .useHeadTracking) ?? false
+        self.depthIntensity = try container.decodeIfPresent(Float.self, forKey: .depthIntensity) ?? 0.04
+        self.focalDepth = try container.decodeIfPresent(Float.self, forKey: .focalDepth) ?? 0.5
+
+        self.displayConfigurations = try container.decodeIfPresent([String: DisplayConfig].self, forKey: .displayConfigurations) ?? [:]
     }
 
     public struct DisplayConfig: Codable, Equatable, Sendable {
         public var assetPath: String?
+        public var photoPath: String?
         public var scalingMode: ScalingMode
         public var isEnabled: Bool
         public var isMuted: Bool
@@ -89,14 +131,25 @@ public struct EngineConfig: Codable, Equatable, Sendable {
 
         public init(
             assetPath: String? = nil,
+            photoPath: String? = nil,
             scalingMode: ScalingMode = .aspectFill,
             isEnabled: Bool = true,
             isMuted: Bool = true
         ) {
             self.assetPath = assetPath
+            self.photoPath = photoPath
             self.scalingMode = scalingMode
             self.isEnabled = isEnabled
             self.isMuted = isMuted
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            self.assetPath = try container.decodeIfPresent(String.self, forKey: .assetPath)
+            self.photoPath = try container.decodeIfPresent(String.self, forKey: .photoPath)
+            self.scalingMode = try container.decodeIfPresent(ScalingMode.self, forKey: .scalingMode) ?? .aspectFill
+            self.isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
+            self.isMuted = try container.decodeIfPresent(Bool.self, forKey: .isMuted) ?? true
         }
     }
 }

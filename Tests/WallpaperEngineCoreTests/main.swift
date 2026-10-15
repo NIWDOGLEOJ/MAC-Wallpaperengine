@@ -36,6 +36,9 @@ await ConfigPersistenceTests.runAllTests()
 await MenuBarControllerTests.runAllTests()
 await AppCoordinatorTests.runAllTests()
 
+// --- AI 3D Parallax Suites ---
+await ParallaxTests.runAllTests()
+
 // Conclude and return POSIX exit code (0 on success, 1 on failure)
 let exitCode = TestRunner.shared.printSummary()
 exit(exitCode)

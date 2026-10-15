@@ -28,6 +28,7 @@ public protocol AppCoordinatorProtocol: AnyObject {
     func stop()
     func togglePlayback()
     func setVideo(url: URL, for displayID: CGDirectDisplayID?) async throws
+    func setPhoto(url: URL, for displayID: CGDirectDisplayID?, useHeadTracking: Bool?) async throws
     func updateConfig(_ update: (inout EngineConfig) -> Void)
     func reconcileAllScreens()
     func flushConfigToDisk()
@@ -57,6 +58,7 @@ public final class AppCoordinator: NSObject,
 
     private var activeDisplayIDs: Set<CGDirectDisplayID> = []
     private var attachedWindows: [CGDirectDisplayID: DesktopWindowProtocol] = [:]
+    public private(set) var parallaxViews: [CGDirectDisplayID: ParallaxWallpaperView] = [:]
     private let configStorage: ConfigStorageProtocol
     private var configSaveTask: Task<Void, Never>?
     public let isHeadless: Bool
@@ -170,6 +172,12 @@ public final class AppCoordinator: NSObject,
         videoEngine.stop()
         windowManager.stop()
 
+        for (_, pView) in parallaxViews {
+            pView.pause()
+            pView.removeFromSuperview()
+        }
+        parallaxViews.removeAll()
+
         // 5. Reset cached decisions
         activeDisplayIDs.removeAll()
         attachedWindows.removeAll()
@@ -185,6 +193,14 @@ public final class AppCoordinator: NSObject,
         occlusionManager.registerDisplay(displayID, isVisible: true)
         videoEngine.registerDisplay(displayID)
 
+        // Resolve assigned photo path for 3D parallax scene
+        let photoPath = config.displayConfigurations[String(displayID)]?.photoPath ?? config.photoPath
+        if let pPath = photoPath, FileManager.default.fileExists(atPath: pPath) {
+            let pURL = URL(fileURLWithPath: pPath)
+            attachParallax(to: window, displayID: displayID, photoURL: pURL)
+            return
+        }
+
         if let player = videoEngine.player(for: displayID) {
             window.attachPlayerLayer(player.playerLayer)
         }
@@ -195,6 +211,35 @@ public final class AppCoordinator: NSObject,
             let url = URL(fileURLWithPath: path)
             Task { @MainActor [weak self] in
                 try? await self?.videoEngine.setVideo(url: url, for: displayID)
+            }
+        }
+    }
+
+    private func attachParallax(to window: DesktopWindowProtocol, displayID: CGDirectDisplayID, photoURL: URL) {
+        window.removePlayerLayer()
+        parallaxViews[displayID]?.removeFromSuperview()
+
+        let frame = window.underlyingWindow.contentView?.bounds ?? window.frame
+        let parallaxView = ParallaxWallpaperView(frame: frame)
+        parallaxView.autoresizingMask = [.width, .height]
+
+        let driver: ParallaxTrackingDriver
+        if config.useHeadTracking {
+            driver = VisionHeadTrackingDriver()
+        } else {
+            driver = PointerParallaxDriver()
+        }
+        parallaxView.attachDriver(driver)
+
+        window.underlyingWindow.contentView?.addSubview(parallaxView)
+        parallaxViews[displayID] = parallaxView
+
+        Task { @MainActor [weak self] in
+            do {
+                try await parallaxView.loadPhoto(from: photoURL)
+                self?.logger.info("3D Parallax scene attached to display \(displayID) for \(photoURL.lastPathComponent)")
+            } catch {
+                self?.logger.error("Failed to load 3D Parallax scene for display \(displayID): \(error.localizedDescription)")
             }
         }
     }
@@ -231,13 +276,21 @@ public final class AppCoordinator: NSObject,
     private func apply(decision: PlaybackDecision, to displayID: CGDirectDisplayID) {
         switch decision {
         case .play(let fps):
-            _ = fps
             videoEngine.setPlaybackState(.playing, for: displayID)
+            if let pView = parallaxViews[displayID] {
+                pView.resume()
+                pView.setTargetFrameRate(fps)
+            }
         case .pause(let reasons):
             let primaryReason = reasons.sorted(by: { $0.rawValue < $1.rawValue }).first ?? .userRequested
             videoEngine.setPlaybackState(.paused(reason: primaryReason), for: displayID)
+            parallaxViews[displayID]?.pause()
         case .throttle(let fps, _):
             videoEngine.setPlaybackState(.throttled(fps: fps), for: displayID)
+            if let pView = parallaxViews[displayID] {
+                pView.resume()
+                pView.setTargetFrameRate(fps)
+            }
         }
     }
 
@@ -325,10 +378,40 @@ public final class AppCoordinator: NSObject,
                 let key = String(id)
                 var disp = cfg.displayConfigurations[key] ?? DisplayConfig()
                 disp.assetPath = url.path
+                disp.photoPath = nil
                 disp.isEnabled = true
                 cfg.displayConfigurations[key] = disp
             } else {
                 cfg.defaultAssetPath = url.path
+                cfg.photoPath = nil
+            }
+        }
+        refreshMenuBarDisplays()
+    }
+
+    public func setPhoto(url: URL, for displayID: CGDirectDisplayID?, useHeadTracking: Bool? = nil) async throws {
+        if let useHead = useHeadTracking {
+            updateConfig { cfg in
+                cfg.useHeadTracking = useHead
+            }
+        }
+        updateConfig { cfg in
+            if let id = displayID {
+                let key = String(id)
+                var disp = cfg.displayConfigurations[key] ?? DisplayConfig()
+                disp.photoPath = url.path
+                disp.isEnabled = true
+                cfg.displayConfigurations[key] = disp
+            } else {
+                cfg.photoPath = url.path
+            }
+        }
+
+        if let id = displayID, let window = attachedWindows[id] {
+            attachParallax(to: window, displayID: id, photoURL: url)
+        } else {
+            for (id, window) in attachedWindows {
+                attachParallax(to: window, displayID: id, photoURL: url)
             }
         }
         refreshMenuBarDisplays()
@@ -406,6 +489,11 @@ public final class AppCoordinator: NSObject,
     }
 
     public func desktopWindowManager(_ manager: DesktopWindowManagerProtocol, didRemoveWindowFor displayID: CGDirectDisplayID) {
+        if let pView = parallaxViews[displayID] {
+            pView.pause()
+            pView.removeFromSuperview()
+            parallaxViews.removeValue(forKey: displayID)
+        }
         activeDisplayIDs.remove(displayID)
         attachedWindows.removeValue(forKey: displayID)
         lastDecisions.removeValue(forKey: displayID)
@@ -435,8 +523,15 @@ public final class AppCoordinator: NSObject,
     }
 
     public func menuBar(_ controller: MenuBarControllerProtocol, didSelectAssetURL url: URL, for displayID: CGDirectDisplayID?) {
+        let ext = url.pathExtension.lowercased()
+        let imageExtensions = ["jpg", "jpeg", "png", "heic", "heif", "tiff", "webp"]
+
         Task { @MainActor [weak self] in
-            try? await self?.setVideo(url: url, for: displayID)
+            if imageExtensions.contains(ext) {
+                try? await self?.setPhoto(url: url, for: displayID)
+            } else {
+                try? await self?.setVideo(url: url, for: displayID)
+            }
         }
     }
 

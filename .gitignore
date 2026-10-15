@@ -22,3 +22,8 @@ probe_m2_watchdog_multidisplay
 *.o
 *.dylib
 *.out
+
+# CoreML Large Model Files
+*.mlmodelc/
+Resources/Models/
+

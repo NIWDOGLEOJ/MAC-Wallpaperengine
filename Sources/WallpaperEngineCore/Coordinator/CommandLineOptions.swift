@@ -24,6 +24,12 @@ public struct CommandLineOptions: Equatable, Sendable {
     public var pauseOnBatteryOverride: Bool?
     public var unknownOptions: [String]
 
+    // 3D Parallax Photo Scene Options
+    public var photoPath: String?
+    public var useHeadTracking: Bool
+    public var depthIntensity: Float?
+    public var focalDepth: Float?
+
     // Convenience aliases
     public var displayID: CGDirectDisplayID? {
         get { targetDisplayID }
@@ -47,6 +53,10 @@ public struct CommandLineOptions: Equatable, Sendable {
 
     public init(
         videoPath: String? = nil,
+        photoPath: String? = nil,
+        useHeadTracking: Bool = false,
+        depthIntensity: Float? = nil,
+        focalDepth: Float? = nil,
         targetDisplayID: CGDirectDisplayID? = nil,
         displayID: CGDirectDisplayID? = nil,
         targetFPS: Int? = nil,
@@ -65,6 +75,10 @@ public struct CommandLineOptions: Equatable, Sendable {
         unknownOptions: [String] = []
     ) {
         self.videoPath = videoPath
+        self.photoPath = photoPath
+        self.useHeadTracking = useHeadTracking
+        self.depthIntensity = depthIntensity
+        self.focalDepth = focalDepth
         self.targetDisplayID = targetDisplayID ?? displayID
         let resolvedFPS = targetFPS ?? targetFrameRate
         self.targetFPS = resolvedFPS.flatMap { $0 > 0 ? $0 : nil }
@@ -201,6 +215,47 @@ public struct CommandLineOptions: Equatable, Sendable {
                 options.pauseOnBatteryOverride = true
                 idx += 1
 
+            case "--photo":
+                if idx + 1 < tokens.count && !isFlag(tokens[idx + 1]) {
+                    options.photoPath = tokens[idx + 1]
+                    idx += 2
+                } else {
+                    unknown.append(token)
+                    idx += 1
+                }
+
+            case "--head-tracking":
+                options.useHeadTracking = true
+                idx += 1
+
+            case "--depth", "--depth-intensity":
+                if idx + 1 < tokens.count && !isFlag(tokens[idx + 1]) {
+                    let val = tokens[idx + 1]
+                    if let parsed = Float(val) {
+                        options.depthIntensity = parsed
+                    } else {
+                        unknown.append("\(token) \(val)")
+                    }
+                    idx += 2
+                } else {
+                    unknown.append(token)
+                    idx += 1
+                }
+
+            case "--focal", "--focal-depth":
+                if idx + 1 < tokens.count && !isFlag(tokens[idx + 1]) {
+                    let val = tokens[idx + 1]
+                    if let parsed = Float(val) {
+                        options.focalDepth = parsed
+                    } else {
+                        unknown.append("\(token) \(val)")
+                    }
+                    idx += 2
+                } else {
+                    unknown.append(token)
+                    idx += 1
+                }
+
             default:
                 unknown.append(token)
                 idx += 1
@@ -215,6 +270,22 @@ public struct CommandLineOptions: Equatable, Sendable {
         switch flag {
         case "--video":
             options.videoPath = value.isEmpty ? nil : value
+        case "--photo":
+            options.photoPath = value.isEmpty ? nil : value
+        case "--head-tracking":
+            options.useHeadTracking = (value.lowercased() != "false" && value != "0")
+        case "--depth", "--depth-intensity":
+            if let d = Float(value) {
+                options.depthIntensity = d
+            } else {
+                unknown.append("\(flag)=\(value)")
+            }
+        case "--focal", "--focal-depth":
+            if let f = Float(value) {
+                options.focalDepth = f
+            } else {
+                unknown.append("\(flag)=\(value)")
+            }
         case "--display":
             if let id = UInt32(value) {
                 options.targetDisplayID = id
@@ -261,6 +332,25 @@ public struct CommandLineOptions: Equatable, Sendable {
                 config.defaultAssetPath = video
             }
         }
+        if let photo = photoPath {
+            if let targetDisplay = targetDisplayID {
+                let key = String(targetDisplay)
+                var displayCfg = config.displayConfigurations[key] ?? DisplayConfig()
+                displayCfg.photoPath = photo
+                config.displayConfigurations[key] = displayCfg
+            } else {
+                config.photoPath = photo
+            }
+        }
+        if useHeadTracking {
+            config.useHeadTracking = true
+        }
+        if let depth = depthIntensity {
+            config.depthIntensity = depth
+        }
+        if let focal = focalDepth {
+            config.focalDepth = focal
+        }
     }
 
     public static var versionString: String {
@@ -276,6 +366,10 @@ public struct CommandLineOptions: Equatable, Sendable {
 
         OPTIONS:
           --video <path>          Override default wallpaper asset path (MP4/MOV)
+          --photo <path>          Set 2D photo path to infer depth and render as 3D parallax
+          --head-tracking         Enable webcam head tracking for perspective parallax
+          --depth <intensity>     Set 3D parallax depth intensity (default: 0.04)
+          --focal <depth>         Set 3D parallax focal plane (default: 0.5)
           --display <id>          Target specific display ID for asset override (UInt32)
           --fps <rate>            Override target rendering frame rate (e.g. 30, 60, 120)
           --throttled-fps <rate>  Override power-throttled frame rate (e.g. 15, 30)
