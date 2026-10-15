@@ -53,6 +53,10 @@ public struct SystemTelemetry: Sendable, Equatable {
         self.gpuPercentage = max(0.0, min(100.0, gpuPercentage))
         self.fps = fps
     }
+
+    public init() {
+        self = .initial
+    }
 }
 
 public final class SystemTelemetryMonitor: @unchecked Sendable {

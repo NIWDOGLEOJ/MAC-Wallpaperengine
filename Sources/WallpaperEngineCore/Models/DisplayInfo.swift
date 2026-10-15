@@ -22,6 +22,15 @@ public struct ScreenDescriptor: Identifiable, Equatable, Hashable, Sendable {
     public let isMain: Bool
     public let isBuiltin: Bool
 
+    public var bounds: CGRect { frame }
+
+    public var refreshRate: Double {
+        if let mode = CGDisplayCopyDisplayMode(displayID) {
+            return mode.refreshRate
+        }
+        return 60.0
+    }
+
     /// Initializes a ScreenDescriptor from an AppKit NSScreen instance.
     @MainActor
     public init(screen: NSScreen) {

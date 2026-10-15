@@ -50,6 +50,7 @@ public protocol MenuBarControllerDelegate: AnyObject {
     func menuBar(_ controller: MenuBarControllerProtocol, didUpdateHUDConfig config: EngineConfig.HUDConfig)
     func menuBar(_ controller: MenuBarControllerProtocol, didToggleAudioReactive enabled: Bool)
     func menuBarDidRequestRevealWallpapers(_ controller: MenuBarControllerProtocol)
+    func menuBarDidRequestOpenApp(_ controller: MenuBarControllerProtocol)
     func menuBarDidRequestQuit(_ controller: MenuBarControllerProtocol)
 }
 
@@ -64,6 +65,7 @@ extension MenuBarControllerDelegate {
     public func menuBar(_ controller: MenuBarControllerProtocol, didUpdateHUDConfig config: EngineConfig.HUDConfig) {}
     public func menuBar(_ controller: MenuBarControllerProtocol, didToggleAudioReactive enabled: Bool) {}
     public func menuBarDidRequestRevealWallpapers(_ controller: MenuBarControllerProtocol) {}
+    public func menuBarDidRequestOpenApp(_ controller: MenuBarControllerProtocol) {}
     public func menuBarDidRequestQuit(_ controller: MenuBarControllerProtocol) {}
 }
 
@@ -368,6 +370,11 @@ public final class MenuBarController: NSObject, MenuBarControllerProtocol, NSMen
         header.isEnabled = false
         rootMenu.addItem(header)
         self.statusHeaderItem = header
+
+        // Open Wallpaper Engine Application Window
+        let openAppItem = NSMenuItem(title: "Open Wallpaper Engine...", action: #selector(handleOpenAppClicked(_:)), keyEquivalent: "o")
+        openAppItem.target = self
+        rootMenu.addItem(openAppItem)
 
         // 2. Play / Pause Toggle (Item 1)
         let toggle = NSMenuItem(title: "Pause Playback", action: #selector(handlePlayPauseClicked(_:)), keyEquivalent: "p")
@@ -867,6 +874,10 @@ public final class MenuBarController: NSObject, MenuBarControllerProtocol, NSMen
         updateConfig(currentConfig)
         delegate?.menuBar(self, didSelectTargetFrameRate: fps)
         delegate?.menuBar(self, didUpdateConfig: currentConfig)
+    }
+
+    @objc public func handleOpenAppClicked(_ sender: Any?) {
+        delegate?.menuBarDidRequestOpenApp(self)
     }
 
     @objc public func handleRevealWallpapersClicked(_ sender: Any?) {

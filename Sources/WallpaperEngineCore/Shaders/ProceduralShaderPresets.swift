@@ -12,12 +12,14 @@
 
 import Foundation
 
-public enum ProceduralShaderPreset: String, CaseIterable, Sendable {
+public enum ProceduralShaderPreset: String, CaseIterable, Identifiable, Sendable {
     case aurora = "aurora"
     case starfield = "starfield"
     case gradientFlow = "gradientFlow"
     case cyberpunkGrid = "cyberpunkGrid"
     case bokeh = "bokeh"
+
+    public var id: String { rawValue }
 
     public var displayName: String {
         switch self {

@@ -45,6 +45,9 @@ await ShaderTests.runAllTests()
 // --- Audio-Reactive Visualizer & Desktop HUD Suites ---
 await AudioHUDTests.runAllTests()
 
+// --- Native macOS Application UI & Studio Suites ---
+await AppUITests.runAllTests()
+
 // Conclude and return POSIX exit code (0 on success, 1 on failure)
 let exitCode = TestRunner.shared.printSummary()
 exit(exitCode)

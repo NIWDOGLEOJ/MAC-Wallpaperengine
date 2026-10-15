@@ -15,6 +15,7 @@ public struct CommandLineOptions: Equatable, Sendable {
     public var targetFPS: Int?
     public var throttledFPS: Int?
     public var isHeadless: Bool
+    public var showWindow: Bool
     public var isBenchmark: Bool
     public var configPath: String?
     public var isHelpRequested: Bool
@@ -80,6 +81,7 @@ public struct CommandLineOptions: Equatable, Sendable {
         throttledFPS: Int? = nil,
         throttledFrameRate: Int? = nil,
         isHeadless: Bool = false,
+        showWindow: Bool = true,
         isBenchmark: Bool = false,
         configPath: String? = nil,
         isHelpRequested: Bool = false,
@@ -107,6 +109,7 @@ public struct CommandLineOptions: Equatable, Sendable {
         let resolvedThrottled = throttledFPS ?? throttledFrameRate
         self.throttledFPS = resolvedThrottled.flatMap { $0 > 0 ? $0 : nil }
         self.isHeadless = isHeadless
+        self.showWindow = !isHeadless && showWindow
         self.isBenchmark = isBenchmark
         self.configPath = configPath
         self.isHelpRequested = isHelpRequested
@@ -214,6 +217,15 @@ public struct CommandLineOptions: Equatable, Sendable {
 
             case "--headless":
                 options.isHeadless = true
+                options.showWindow = false
+                idx += 1
+
+            case "--no-window", "--menu-bar-only":
+                options.showWindow = false
+                idx += 1
+
+            case "--window", "--gui":
+                options.showWindow = true
                 idx += 1
 
             case "--benchmark":

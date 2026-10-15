@@ -48,6 +48,16 @@ public struct EngineConfig: Codable, Equatable, Sendable {
     public var shaderPath: String?
     public var shaderSpeed: Float
 
+    public var shaderPreset: ProceduralShaderPreset? {
+        get {
+            guard let shaderName = shaderName else { return nil }
+            return ProceduralShaderPreset(rawValue: shaderName)
+        }
+        set {
+            shaderName = newValue?.rawValue
+        }
+    }
+
     // Desktop HUD & Glassmorphic Widgets
     public var hudConfig: HUDConfig
 

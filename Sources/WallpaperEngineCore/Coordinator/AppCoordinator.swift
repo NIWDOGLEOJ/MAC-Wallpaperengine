@@ -30,12 +30,19 @@ public protocol AppCoordinatorProtocol: AnyObject {
     var audioCapture: SystemAudioCapture { get }
     var nowPlayingMonitor: NowPlayingMonitor { get }
     var telemetryMonitor: SystemTelemetryMonitor { get }
+    var appState: AppState? { get }
+    var mainWindowController: MainWindowController? { get }
 
     func start()
     func stop()
     func togglePlayback()
+    func pause()
+    func resume()
+    func showMainWindow()
+    func toggleMainWindow()
     func setVideo(url: URL, for displayID: CGDirectDisplayID?) async throws
     func setPhoto(url: URL, for displayID: CGDirectDisplayID?, useHeadTracking: Bool?) async throws
+    func setParallaxPhoto(url: URL, for displayID: CGDirectDisplayID?, useHeadTracking: Bool?)
     func setShader(preset: ProceduralShaderPreset, for displayID: CGDirectDisplayID?, speed: Float?)
     func setShader(url: URL, for displayID: CGDirectDisplayID?, speed: Float?)
     func attachOrUpdateHUD(for displayID: CGDirectDisplayID, in window: DesktopWindowProtocol)
@@ -74,6 +81,8 @@ public final class AppCoordinator: NSObject,
     public let audioCapture: SystemAudioCapture
     public let nowPlayingMonitor: NowPlayingMonitor
     public let telemetryMonitor: SystemTelemetryMonitor
+    public private(set) var appState: AppState?
+    public private(set) var mainWindowController: MainWindowController?
     private let configStorage: ConfigStorageProtocol
     private var configSaveTask: Task<Void, Never>?
     public let isHeadless: Bool
@@ -129,6 +138,13 @@ public final class AppCoordinator: NSObject,
 
         super.init()
 
+        // Initialize central observable UI state & window controller
+        let state = AppState(config: resolvedConfig, coordinator: self)
+        self.appState = state
+        if !headlessFlag {
+            self.mainWindowController = MainWindowController(appState: state)
+        }
+
         // Wire delegate relationships
         self.windowManager.delegate = self
         self.powerObserver.delegate = self
@@ -141,6 +157,7 @@ public final class AppCoordinator: NSObject,
         self.audioCapture.onSpectrumUpdate = { [weak self] spectrum in
             Task { @MainActor [weak self] in
                 guard let self = self, self.isRunning else { return }
+                self.appState?.updateAudioSpectrum(spectrum)
                 if self.config.isAudioReactive {
                     for sView in self.shaderViews.values {
                         sView.updateAudio(spectrum: spectrum)
@@ -157,6 +174,7 @@ public final class AppCoordinator: NSObject,
         self.telemetryMonitor.onTelemetryUpdate = { [weak self] telemetry in
             Task { @MainActor [weak self] in
                 guard let self = self, self.isRunning else { return }
+                self.appState?.updateTelemetry(telemetry)
                 if self.config.hudConfig.isEnabled && self.config.hudConfig.showSystemStats {
                     for hView in self.hudViews.values {
                         hView.updateTelemetry(telemetry)
@@ -168,6 +186,7 @@ public final class AppCoordinator: NSObject,
         self.nowPlayingMonitor.onNowPlayingChange = { [weak self] info in
             Task { @MainActor [weak self] in
                 guard let self = self, self.isRunning else { return }
+                self.appState?.updateNowPlaying(info)
                 if self.config.hudConfig.isEnabled && self.config.hudConfig.showNowPlaying {
                     for hView in self.hudViews.values {
                         hView.updateNowPlaying(info)
@@ -539,6 +558,7 @@ public final class AppCoordinator: NSObject,
     }
 
     public func refreshMenuBarDisplays() {
+        appState?.updateDisplays(windowManager.screenManager.activeScreens)
         guard let menu = menuBarController else { return }
 
         var displayModels: [DisplayMenuItemModel] = []
@@ -570,6 +590,32 @@ public final class AppCoordinator: NSObject,
         updateConfig { cfg in
             cfg.isPaused.toggle()
         }
+    }
+
+    public func pause() {
+        updateConfig { cfg in
+            cfg.isPaused = true
+        }
+    }
+
+    public func resume() {
+        updateConfig { cfg in
+            cfg.isPaused = false
+        }
+    }
+
+    // MARK: - Application Window Lifecycle
+
+    public func showMainWindow() {
+        mainWindowController?.showMainWindow()
+    }
+
+    public func toggleMainWindow() {
+        mainWindowController?.toggleMainWindow()
+    }
+
+    public func menuBarDidRequestOpenApp(_ controller: MenuBarControllerProtocol) {
+        showMainWindow()
     }
 
     public func setVideo(url: URL, for displayID: CGDirectDisplayID?) async throws {
@@ -617,6 +663,12 @@ public final class AppCoordinator: NSObject,
             }
         }
         refreshMenuBarDisplays()
+    }
+
+    public func setParallaxPhoto(url: URL, for displayID: CGDirectDisplayID?, useHeadTracking: Bool? = nil) {
+        Task { @MainActor [weak self] in
+            try? await self?.setPhoto(url: url, for: displayID, useHeadTracking: useHeadTracking)
+        }
     }
 
     public func setShader(preset: ProceduralShaderPreset, for displayID: CGDirectDisplayID? = nil, speed: Float? = nil) {
@@ -687,6 +739,7 @@ public final class AppCoordinator: NSObject,
 
     public func updateConfig(_ update: (inout EngineConfig) -> Void) {
         update(&config)
+        appState?.config = config
         menuBarController?.updateConfig(config)
         for (id, window) in attachedWindows {
             attachOrUpdateHUD(for: id, in: window)

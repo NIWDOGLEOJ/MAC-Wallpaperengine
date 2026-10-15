@@ -37,6 +37,18 @@ public struct NowPlayingInfo: Sendable, Equatable {
         self.playbackPosition = playbackPosition
         self.duration = duration
     }
+
+    public static let empty = NowPlayingInfo(
+        title: "",
+        artist: "",
+        album: "",
+        source: "None",
+        isPlaying: false
+    )
+
+    public init() {
+        self.init(title: "", artist: "", album: "", source: "None", isPlaying: false)
+    }
 }
 
 public final class NowPlayingMonitor: @unchecked Sendable {

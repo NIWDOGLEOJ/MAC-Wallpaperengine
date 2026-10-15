@@ -36,14 +36,24 @@ if cliOptions.dumpConfig {
     exit(0)
 }
 
-// 3. Configure macOS Accessory Application Activation Policy (LSUIElement = 1)
-// Ensures the daemon operates without stealing focus or displaying a Dock icon.
-NSApplication.shared.setActivationPolicy(.accessory)
+// 3. Configure macOS Application Activation Policy
+// If headless or menu-bar-only, run as accessory (background helper without Dock icon).
+// If interactive, set activation policy to .regular so the GUI window has full macOS menus and Dock presence.
+if cliOptions.isHeadless || !cliOptions.showWindow {
+    NSApplication.shared.setActivationPolicy(.accessory)
+} else {
+    NSApplication.shared.setActivationPolicy(.regular)
+}
 
 // 4. Initialize and start the master AppCoordinator
 let storage = FileConfigStorage(fileURL: cliOptions.configPath.map { URL(fileURLWithPath: $0) })
 let coordinator = AppCoordinator(configStorage: storage, cliOptions: cliOptions)
 coordinator.start()
+
+// 5. Present the primary user interface window if requested
+if cliOptions.showWindow {
+    coordinator.showMainWindow()
+}
 
 // 5. Handle benchmark mode if requested
 if cliOptions.isBenchmark {
