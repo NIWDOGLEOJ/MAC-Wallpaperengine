@@ -59,6 +59,7 @@ public final class AppCoordinator: NSObject,
     private var activeDisplayIDs: Set<CGDirectDisplayID> = []
     private var attachedWindows: [CGDirectDisplayID: DesktopWindowProtocol] = [:]
     public private(set) var parallaxViews: [CGDirectDisplayID: ParallaxWallpaperView] = [:]
+    public private(set) var shaderViews: [CGDirectDisplayID: ShaderWallpaperView] = [:]
     private let configStorage: ConfigStorageProtocol
     private var configSaveTask: Task<Void, Never>?
     public let isHeadless: Bool
@@ -178,6 +179,12 @@ public final class AppCoordinator: NSObject,
         }
         parallaxViews.removeAll()
 
+        for (_, sView) in shaderViews {
+            sView.pause()
+            sView.removeFromSuperview()
+        }
+        shaderViews.removeAll()
+
         // 5. Reset cached decisions
         activeDisplayIDs.removeAll()
         attachedWindows.removeAll()
@@ -193,8 +200,22 @@ public final class AppCoordinator: NSObject,
         occlusionManager.registerDisplay(displayID, isVisible: true)
         videoEngine.registerDisplay(displayID)
 
-        // Resolve assigned photo path for 3D parallax scene
-        let photoPath = config.displayConfigurations[String(displayID)]?.photoPath ?? config.photoPath
+        // 1. Resolve procedural or imported shader
+        let dispConfig = config.displayConfigurations[String(displayID)]
+        let shaderName = dispConfig?.shaderName ?? config.shaderName
+        let shaderPath = dispConfig?.shaderPath ?? config.shaderPath
+
+        if let sName = shaderName, let preset = ProceduralShaderPreset(rawValue: sName) {
+            attachShader(to: window, displayID: displayID, preset: preset)
+            return
+        } else if let sPath = shaderPath, FileManager.default.fileExists(atPath: sPath) {
+            let sURL = URL(fileURLWithPath: sPath)
+            attachShader(to: window, displayID: displayID, fileURL: sURL)
+            return
+        }
+
+        // 2. Resolve assigned photo path for 3D parallax scene
+        let photoPath = dispConfig?.photoPath ?? config.photoPath
         if let pPath = photoPath, FileManager.default.fileExists(atPath: pPath) {
             let pURL = URL(fileURLWithPath: pPath)
             attachParallax(to: window, displayID: displayID, photoURL: pURL)
@@ -205,8 +226,8 @@ public final class AppCoordinator: NSObject,
             window.attachPlayerLayer(player.playerLayer)
         }
 
-        // Resolve assigned video path
-        let assetPath = config.displayConfigurations[String(displayID)]?.assetPath ?? config.defaultAssetPath
+        // 3. Resolve assigned video path
+        let assetPath = dispConfig?.assetPath ?? config.defaultAssetPath
         if let path = assetPath, FileManager.default.fileExists(atPath: path) {
             let url = URL(fileURLWithPath: path)
             Task { @MainActor [weak self] in
@@ -215,8 +236,62 @@ public final class AppCoordinator: NSObject,
         }
     }
 
+    private func attachShader(to window: DesktopWindowProtocol, displayID: CGDirectDisplayID, preset: ProceduralShaderPreset) {
+        window.removePlayerLayer()
+        parallaxViews[displayID]?.pause()
+        parallaxViews[displayID]?.removeFromSuperview()
+        parallaxViews.removeValue(forKey: displayID)
+
+        shaderViews[displayID]?.pause()
+        shaderViews[displayID]?.removeFromSuperview()
+
+        let frame = window.underlyingWindow.contentView?.bounds ?? window.frame
+        let shaderView = ShaderWallpaperView(frame: frame)
+        shaderView.autoresizingMask = [.width, .height]
+        shaderView.setSpeed(config.shaderSpeed)
+        shaderView.setTargetFrameRate(config.targetFrameRate)
+
+        do {
+            try shaderView.loadPreset(preset)
+            window.underlyingWindow.contentView?.addSubview(shaderView)
+            shaderViews[displayID] = shaderView
+            logger.info("Procedural shader '\(preset.displayName)' attached to display \(displayID)")
+        } catch {
+            logger.error("Failed to load procedural preset '\(preset.displayName)': \(error.localizedDescription)")
+        }
+    }
+
+    private func attachShader(to window: DesktopWindowProtocol, displayID: CGDirectDisplayID, fileURL: URL) {
+        window.removePlayerLayer()
+        parallaxViews[displayID]?.pause()
+        parallaxViews[displayID]?.removeFromSuperview()
+        parallaxViews.removeValue(forKey: displayID)
+
+        shaderViews[displayID]?.pause()
+        shaderViews[displayID]?.removeFromSuperview()
+
+        let frame = window.underlyingWindow.contentView?.bounds ?? window.frame
+        let shaderView = ShaderWallpaperView(frame: frame)
+        shaderView.autoresizingMask = [.width, .height]
+        shaderView.setSpeed(config.shaderSpeed)
+        shaderView.setTargetFrameRate(config.targetFrameRate)
+
+        do {
+            try shaderView.loadShader(from: fileURL)
+            window.underlyingWindow.contentView?.addSubview(shaderView)
+            shaderViews[displayID] = shaderView
+            logger.info("Custom shader '\(fileURL.lastPathComponent)' attached to display \(displayID)")
+        } catch {
+            logger.error("Failed to load custom shader from \(fileURL.path): \(error.localizedDescription)")
+        }
+    }
+
     private func attachParallax(to window: DesktopWindowProtocol, displayID: CGDirectDisplayID, photoURL: URL) {
         window.removePlayerLayer()
+        shaderViews[displayID]?.pause()
+        shaderViews[displayID]?.removeFromSuperview()
+        shaderViews.removeValue(forKey: displayID)
+
         parallaxViews[displayID]?.removeFromSuperview()
 
         let frame = window.underlyingWindow.contentView?.bounds ?? window.frame
@@ -281,15 +356,24 @@ public final class AppCoordinator: NSObject,
                 pView.resume()
                 pView.setTargetFrameRate(fps)
             }
+            if let sView = shaderViews[displayID] {
+                sView.resume()
+                sView.setTargetFrameRate(fps)
+            }
         case .pause(let reasons):
             let primaryReason = reasons.sorted(by: { $0.rawValue < $1.rawValue }).first ?? .userRequested
             videoEngine.setPlaybackState(.paused(reason: primaryReason), for: displayID)
             parallaxViews[displayID]?.pause()
+            shaderViews[displayID]?.pause()
         case .throttle(let fps, _):
             videoEngine.setPlaybackState(.throttled(fps: fps), for: displayID)
             if let pView = parallaxViews[displayID] {
                 pView.resume()
                 pView.setTargetFrameRate(fps)
+            }
+            if let sView = shaderViews[displayID] {
+                sView.resume()
+                sView.setTargetFrameRate(fps)
             }
         }
     }
@@ -417,6 +501,70 @@ public final class AppCoordinator: NSObject,
         refreshMenuBarDisplays()
     }
 
+    public func setShader(preset: ProceduralShaderPreset, for displayID: CGDirectDisplayID? = nil, speed: Float? = nil) {
+        if let sp = speed {
+            updateConfig { cfg in
+                cfg.shaderSpeed = sp
+            }
+        }
+        updateConfig { cfg in
+            if let id = displayID {
+                let key = String(id)
+                var disp = cfg.displayConfigurations[key] ?? DisplayConfig()
+                disp.shaderName = preset.rawValue
+                disp.shaderPath = nil
+                disp.photoPath = nil
+                disp.isEnabled = true
+                cfg.displayConfigurations[key] = disp
+            } else {
+                cfg.shaderName = preset.rawValue
+                cfg.shaderPath = nil
+                cfg.photoPath = nil
+            }
+        }
+
+        if let id = displayID, let window = attachedWindows[id] {
+            attachShader(to: window, displayID: id, preset: preset)
+        } else {
+            for (id, window) in attachedWindows {
+                attachShader(to: window, displayID: id, preset: preset)
+            }
+        }
+        refreshMenuBarDisplays()
+    }
+
+    public func setShader(url: URL, for displayID: CGDirectDisplayID? = nil, speed: Float? = nil) {
+        if let sp = speed {
+            updateConfig { cfg in
+                cfg.shaderSpeed = sp
+            }
+        }
+        updateConfig { cfg in
+            if let id = displayID {
+                let key = String(id)
+                var disp = cfg.displayConfigurations[key] ?? DisplayConfig()
+                disp.shaderPath = url.path
+                disp.shaderName = nil
+                disp.photoPath = nil
+                disp.isEnabled = true
+                cfg.displayConfigurations[key] = disp
+            } else {
+                cfg.shaderPath = url.path
+                cfg.shaderName = nil
+                cfg.photoPath = nil
+            }
+        }
+
+        if let id = displayID, let window = attachedWindows[id] {
+            attachShader(to: window, displayID: id, fileURL: url)
+        } else {
+            for (id, window) in attachedWindows {
+                attachShader(to: window, displayID: id, fileURL: url)
+            }
+        }
+        refreshMenuBarDisplays()
+    }
+
     // MARK: - Configuration Mutations & Debounced Persistence
 
     public func updateConfig(_ update: (inout EngineConfig) -> Void) {
@@ -489,6 +637,11 @@ public final class AppCoordinator: NSObject,
     }
 
     public func desktopWindowManager(_ manager: DesktopWindowManagerProtocol, didRemoveWindowFor displayID: CGDirectDisplayID) {
+        if let sView = shaderViews[displayID] {
+            sView.pause()
+            sView.removeFromSuperview()
+            shaderViews.removeValue(forKey: displayID)
+        }
         if let pView = parallaxViews[displayID] {
             pView.pause()
             pView.removeFromSuperview()
@@ -525,6 +678,12 @@ public final class AppCoordinator: NSObject,
     public func menuBar(_ controller: MenuBarControllerProtocol, didSelectAssetURL url: URL, for displayID: CGDirectDisplayID?) {
         let ext = url.pathExtension.lowercased()
         let imageExtensions = ["jpg", "jpeg", "png", "heic", "heif", "tiff", "webp"]
+        let shaderExtensions = ["metal", "shadertoy", "frag", "glsl", "txt"]
+
+        if shaderExtensions.contains(ext) {
+            setShader(url: url, for: displayID)
+            return
+        }
 
         Task { @MainActor [weak self] in
             if imageExtensions.contains(ext) {
@@ -532,6 +691,21 @@ public final class AppCoordinator: NSObject,
             } else {
                 try? await self?.setVideo(url: url, for: displayID)
             }
+        }
+    }
+
+    public func menuBar(_ controller: MenuBarControllerProtocol, didSelectShaderPreset preset: String, for displayID: CGDirectDisplayID?) {
+        if let p = ProceduralShaderPreset(nameOrKey: preset) {
+            setShader(preset: p, for: displayID)
+        }
+    }
+
+    public func menuBar(_ controller: MenuBarControllerProtocol, didSelectShaderSpeed speed: Float) {
+        updateConfig { cfg in
+            cfg.shaderSpeed = speed
+        }
+        for view in shaderViews.values {
+            view.speed = speed
         }
     }
 

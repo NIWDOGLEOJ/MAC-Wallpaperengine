@@ -30,6 +30,11 @@ public struct CommandLineOptions: Equatable, Sendable {
     public var depthIntensity: Float?
     public var focalDepth: Float?
 
+    // Real-Time Procedural Metal & Imported Shader Options
+    public var shaderName: String?
+    public var shaderPath: String?
+    public var shaderSpeed: Float?
+
     // Convenience aliases
     public var displayID: CGDirectDisplayID? {
         get { targetDisplayID }
@@ -57,6 +62,9 @@ public struct CommandLineOptions: Equatable, Sendable {
         useHeadTracking: Bool = false,
         depthIntensity: Float? = nil,
         focalDepth: Float? = nil,
+        shaderName: String? = nil,
+        shaderPath: String? = nil,
+        shaderSpeed: Float? = nil,
         targetDisplayID: CGDirectDisplayID? = nil,
         displayID: CGDirectDisplayID? = nil,
         targetFPS: Int? = nil,
@@ -79,6 +87,9 @@ public struct CommandLineOptions: Equatable, Sendable {
         self.useHeadTracking = useHeadTracking
         self.depthIntensity = depthIntensity
         self.focalDepth = focalDepth
+        self.shaderName = shaderName
+        self.shaderPath = shaderPath
+        self.shaderSpeed = shaderSpeed
         self.targetDisplayID = targetDisplayID ?? displayID
         let resolvedFPS = targetFPS ?? targetFrameRate
         self.targetFPS = resolvedFPS.flatMap { $0 > 0 ? $0 : nil }
@@ -256,6 +267,37 @@ public struct CommandLineOptions: Equatable, Sendable {
                     idx += 1
                 }
 
+            case "--shader":
+                if idx + 1 < tokens.count && !isFlag(tokens[idx + 1]) {
+                    let val = tokens[idx + 1]
+                    let isPath = val.hasPrefix("/") || val.hasPrefix("./") || val.hasPrefix("../") ||
+                                 ["metal", "frag", "glsl", "shadertoy", "txt"].contains(URL(fileURLWithPath: val).pathExtension.lowercased()) ||
+                                 FileManager.default.fileExists(atPath: val)
+                    if isPath {
+                        options.shaderPath = val
+                    } else {
+                        options.shaderName = val
+                    }
+                    idx += 2
+                } else {
+                    unknown.append(token)
+                    idx += 1
+                }
+
+            case "--shader-speed", "--speed":
+                if idx + 1 < tokens.count && !isFlag(tokens[idx + 1]) {
+                    let val = tokens[idx + 1]
+                    if let parsed = Float(val) {
+                        options.shaderSpeed = parsed
+                    } else {
+                        unknown.append("\(token) \(val)")
+                    }
+                    idx += 2
+                } else {
+                    unknown.append(token)
+                    idx += 1
+                }
+
             default:
                 unknown.append(token)
                 idx += 1
@@ -272,6 +314,26 @@ public struct CommandLineOptions: Equatable, Sendable {
             options.videoPath = value.isEmpty ? nil : value
         case "--photo":
             options.photoPath = value.isEmpty ? nil : value
+        case "--shader":
+            if value.isEmpty {
+                options.shaderName = nil
+                options.shaderPath = nil
+            } else {
+                let isPath = value.hasPrefix("/") || value.hasPrefix("./") || value.hasPrefix("../") ||
+                             ["metal", "frag", "glsl", "shadertoy", "txt"].contains(URL(fileURLWithPath: value).pathExtension.lowercased()) ||
+                             FileManager.default.fileExists(atPath: value)
+                if isPath {
+                    options.shaderPath = value
+                } else {
+                    options.shaderName = value
+                }
+            }
+        case "--shader-speed", "--speed":
+            if let s = Float(value) {
+                options.shaderSpeed = s
+            } else {
+                unknown.append("\(flag)=\(value)")
+            }
         case "--head-tracking":
             options.useHeadTracking = (value.lowercased() != "false" && value != "0")
         case "--depth", "--depth-intensity":
@@ -342,6 +404,29 @@ public struct CommandLineOptions: Equatable, Sendable {
                 config.photoPath = photo
             }
         }
+        if let shader = shaderName {
+            if let targetDisplay = targetDisplayID {
+                let key = String(targetDisplay)
+                var displayCfg = config.displayConfigurations[key] ?? DisplayConfig()
+                displayCfg.shaderName = shader
+                config.displayConfigurations[key] = displayCfg
+            } else {
+                config.shaderName = shader
+            }
+        }
+        if let path = shaderPath {
+            if let targetDisplay = targetDisplayID {
+                let key = String(targetDisplay)
+                var displayCfg = config.displayConfigurations[key] ?? DisplayConfig()
+                displayCfg.shaderPath = path
+                config.displayConfigurations[key] = displayCfg
+            } else {
+                config.shaderPath = path
+            }
+        }
+        if let speed = shaderSpeed {
+            config.shaderSpeed = speed
+        }
         if useHeadTracking {
             config.useHeadTracking = true
         }
@@ -367,6 +452,8 @@ public struct CommandLineOptions: Equatable, Sendable {
         OPTIONS:
           --video <path>          Override default wallpaper asset path (MP4/MOV)
           --photo <path>          Set 2D photo path to infer depth and render as 3D parallax
+          --shader <name|path>    Load procedural preset (aurora, starfield, gradientFlow, cyberpunkGrid, bokeh) or custom shader path (.metal, .shadertoy)
+          --shader-speed <speed>  Set procedural shader animation speed multiplier (e.g. 0.5, 1.0, 2.0)
           --head-tracking         Enable webcam head tracking for perspective parallax
           --depth <intensity>     Set 3D parallax depth intensity (default: 0.04)
           --focal <depth>         Set 3D parallax focal plane (default: 0.5)

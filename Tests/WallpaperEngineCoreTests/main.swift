@@ -39,6 +39,9 @@ await AppCoordinatorTests.runAllTests()
 // --- AI 3D Parallax Suites ---
 await ParallaxTests.runAllTests()
 
+// --- Real-Time Metal Procedural Shader Suites ---
+await ShaderTests.runAllTests()
+
 // Conclude and return POSIX exit code (0 on success, 1 on failure)
 let exitCode = TestRunner.shared.printSummary()
 exit(exitCode)

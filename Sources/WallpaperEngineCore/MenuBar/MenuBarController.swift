@@ -45,6 +45,8 @@ public protocol MenuBarControllerDelegate: AnyObject {
     func menuBar(_ controller: MenuBarControllerProtocol, didUpdateConfig config: EngineConfig)
     func menuBar(_ controller: MenuBarControllerProtocol, didSelectTargetFrameRate fps: Int)
     func menuBar(_ controller: MenuBarControllerProtocol, didTogglePauseFor displayID: CGDirectDisplayID)
+    func menuBar(_ controller: MenuBarControllerProtocol, didSelectShaderPreset preset: String, for displayID: CGDirectDisplayID?)
+    func menuBar(_ controller: MenuBarControllerProtocol, didSelectShaderSpeed speed: Float)
     func menuBarDidRequestRevealWallpapers(_ controller: MenuBarControllerProtocol)
     func menuBarDidRequestQuit(_ controller: MenuBarControllerProtocol)
 }
@@ -55,6 +57,8 @@ extension MenuBarControllerDelegate {
     public func menuBar(_ controller: MenuBarControllerProtocol, didUpdateConfig config: EngineConfig) {}
     public func menuBar(_ controller: MenuBarControllerProtocol, didSelectTargetFrameRate fps: Int) {}
     public func menuBar(_ controller: MenuBarControllerProtocol, didTogglePauseFor displayID: CGDirectDisplayID) {}
+    public func menuBar(_ controller: MenuBarControllerProtocol, didSelectShaderPreset preset: String, for displayID: CGDirectDisplayID?) {}
+    public func menuBar(_ controller: MenuBarControllerProtocol, didSelectShaderSpeed speed: Float) {}
     public func menuBarDidRequestRevealWallpapers(_ controller: MenuBarControllerProtocol) {}
     public func menuBarDidRequestQuit(_ controller: MenuBarControllerProtocol) {}
 }
@@ -213,12 +217,18 @@ public final class MenuBarController: NSObject, MenuBarControllerProtocol, NSMen
     private var throttleOnBatteryItem: NSMenuItem?
     private var frameRateItems: [Int: NSMenuItem] = [:]
 
+    // Procedural Shader menu item references
+    private var shadersSubmenu: NSMenu?
+    private var shaderPresetItems: [String: NSMenuItem] = [:]
+    private var shaderSpeedItems: [Float: NSMenuItem] = [:]
+
     // Public accessors for test inspection
     public var rootMenuInstance: NSMenu { rootMenu }
     public var cachedStatusHeaderItem: NSMenuItem? { statusHeaderItem }
     public var cachedPlayPauseItem: NSMenuItem? { playPauseItem }
     public var cachedDisplaysSubmenu: NSMenu? { displaysSubmenu }
     public var cachedPreferencesSubmenu: NSMenu? { preferencesSubmenu }
+    public var cachedShadersSubmenu: NSMenu? { shadersSubmenu }
 
     public init(
         isHeadless: Bool = false,
@@ -363,7 +373,18 @@ public final class MenuBarController: NSObject, MenuBarControllerProtocol, NSMen
 
         rootMenu.addItem(.separator())
 
-        // 4. Preferences Submenu (Item 5)
+        // 4. Procedural Shaders Submenu
+        let shadersMenu = NSMenu(title: "Procedural Shaders")
+        shadersMenu.autoenablesItems = false
+        buildProceduralShadersSubmenu(shadersMenu)
+        let shadersParentItem = NSMenuItem(title: "Procedural Shaders", action: nil, keyEquivalent: "")
+        shadersParentItem.submenu = shadersMenu
+        rootMenu.addItem(shadersParentItem)
+        self.shadersSubmenu = shadersMenu
+
+        rootMenu.addItem(.separator())
+
+        // 5. Preferences Submenu
         let prefMenu = NSMenu(title: "Preferences")
         prefMenu.autoenablesItems = false
         buildPreferencesSubmenu(prefMenu)
@@ -427,6 +448,47 @@ public final class MenuBarController: NSObject, MenuBarControllerProtocol, NSMen
         let chooseAllItem = NSMenuItem(title: "Assign Wallpaper to All Displays...", action: #selector(handleChooseWallpaperForAllClicked(_:)), keyEquivalent: "")
         chooseAllItem.target = self
         submenu.addItem(chooseAllItem)
+    }
+
+    private func buildProceduralShadersSubmenu(_ menu: NSMenu) {
+        menu.removeAllItems()
+        shaderPresetItems.removeAll()
+        shaderSpeedItems.removeAll()
+
+        for preset in ProceduralShaderPreset.allCases {
+            let item = NSMenuItem(title: preset.displayName, action: #selector(handleSelectShaderPreset(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = preset.rawValue
+            menu.addItem(item)
+            shaderPresetItems[preset.rawValue] = item
+        }
+
+        menu.addItem(.separator())
+
+        let importItem = NSMenuItem(title: "Import Custom Shader...", action: #selector(handleImportCustomShaderClicked(_:)), keyEquivalent: "")
+        importItem.target = self
+        menu.addItem(importItem)
+
+        menu.addItem(.separator())
+
+        let speedMenu = NSMenu(title: "Shader Speed")
+        speedMenu.autoenablesItems = false
+        let speeds: [(Float, String)] = [
+            (0.5, "0.5x (Slow)"),
+            (1.0, "1.0x (Normal)"),
+            (1.5, "1.5x (Fast)"),
+            (2.0, "2.0x (Ultra)")
+        ]
+        for (sp, label) in speeds {
+            let spItem = NSMenuItem(title: label, action: #selector(handleSelectShaderSpeed(_:)), keyEquivalent: "")
+            spItem.target = self
+            spItem.representedObject = sp
+            speedMenu.addItem(spItem)
+            shaderSpeedItems[sp] = spItem
+        }
+        let speedParent = NSMenuItem(title: "Shader Speed", action: nil, keyEquivalent: "")
+        speedParent.submenu = speedMenu
+        menu.addItem(speedParent)
     }
 
     private func buildPreferencesSubmenu(_ menu: NSMenu) {
@@ -555,6 +617,14 @@ public final class MenuBarController: NSObject, MenuBarControllerProtocol, NSMen
         for (fps, item) in frameRateItems {
             item.state = (config.targetFrameRate == fps) ? .on : .off
         }
+
+        for (name, item) in shaderPresetItems {
+            item.state = (config.shaderName == name) ? .on : .off
+        }
+
+        for (sp, item) in shaderSpeedItems {
+            item.state = (abs(config.shaderSpeed - sp) < 0.05) ? .on : .off
+        }
     }
 
     // MARK: - Action Handlers
@@ -576,6 +646,34 @@ public final class MenuBarController: NSObject, MenuBarControllerProtocol, NSMen
             guard let self = self, let selectedURL = url else { return }
             self.delegate?.menuBar(self, didSelectAssetURL: selectedURL, for: nil)
         }
+    }
+
+    @objc public func handleSelectShaderPreset(_ sender: NSMenuItem) {
+        guard let rawVal = sender.representedObject as? String else { return }
+        currentConfig.shaderName = rawVal
+        currentConfig.shaderPath = nil
+        updateConfig(currentConfig)
+        delegate?.menuBar(self, didSelectShaderPreset: rawVal, for: nil)
+        delegate?.menuBar(self, didUpdateConfig: currentConfig)
+    }
+
+    @objc public func handleImportCustomShaderClicked(_ sender: Any?) {
+        filePickerHandler(nil) { [weak self] url in
+            guard let self = self, let selectedURL = url else { return }
+            self.currentConfig.shaderName = nil
+            self.currentConfig.shaderPath = selectedURL.path
+            self.updateConfig(self.currentConfig)
+            self.delegate?.menuBar(self, didSelectAssetURL: selectedURL, for: nil)
+            self.delegate?.menuBar(self, didUpdateConfig: self.currentConfig)
+        }
+    }
+
+    @objc public func handleSelectShaderSpeed(_ sender: NSMenuItem) {
+        guard let sp = sender.representedObject as? Float else { return }
+        currentConfig.shaderSpeed = sp
+        updateConfig(currentConfig)
+        delegate?.menuBar(self, didSelectShaderSpeed: sp)
+        delegate?.menuBar(self, didUpdateConfig: currentConfig)
     }
 
     @objc public func handleToggleDisplayPauseClicked(_ sender: NSMenuItem) {
@@ -644,8 +742,9 @@ public final class MenuBarController: NSObject, MenuBarControllerProtocol, NSMen
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
-        panel.allowedContentTypes = [.movie, .mpeg4Movie, .quickTimeMovie, .image, .jpeg, .png, .heic]
-        panel.title = (displayID != nil) ? "Choose Wallpaper (Video or 3D Photo) for Display \(displayID!)" : "Choose Wallpaper (Video or 3D Photo) for All Displays"
+        panel.allowsOtherFileTypes = true
+        panel.allowedContentTypes = [.movie, .mpeg4Movie, .quickTimeMovie, .image, .jpeg, .png, .heic, .sourceCode, .plainText, .text]
+        panel.title = (displayID != nil) ? "Choose Wallpaper (Video, 3D Photo, or Shader) for Display \(displayID!)" : "Choose Wallpaper (Video, 3D Photo, or Shader) for All Displays"
         panel.prompt = "Set Wallpaper"
 
         let response = panel.runModal()

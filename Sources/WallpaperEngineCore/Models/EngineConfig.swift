@@ -43,6 +43,11 @@ public struct EngineConfig: Codable, Equatable, Sendable {
     public var depthIntensity: Float
     public var focalDepth: Float
 
+    // Real-Time Procedural Metal & Imported Shaders
+    public var shaderName: String?
+    public var shaderPath: String?
+    public var shaderSpeed: Float
+
     // Per-display configurations (Key: Display Identifier UUID or CGDirectDisplayID string)
     public var displayConfigurations: [String: DisplayConfig]
 
@@ -66,6 +71,9 @@ public struct EngineConfig: Codable, Equatable, Sendable {
         useHeadTracking: Bool = false,
         depthIntensity: Float = 0.04,
         focalDepth: Float = 0.5,
+        shaderName: String? = nil,
+        shaderPath: String? = nil,
+        shaderSpeed: Float = 1.0,
         displayConfigurations: [String: DisplayConfig] = [:]
     ) {
         self.version = version
@@ -86,6 +94,9 @@ public struct EngineConfig: Codable, Equatable, Sendable {
         self.useHeadTracking = useHeadTracking
         self.depthIntensity = depthIntensity
         self.focalDepth = focalDepth
+        self.shaderName = shaderName
+        self.shaderPath = shaderPath
+        self.shaderSpeed = max(0.01, shaderSpeed)
         self.displayConfigurations = displayConfigurations
     }
 
@@ -113,12 +124,18 @@ public struct EngineConfig: Codable, Equatable, Sendable {
         self.depthIntensity = try container.decodeIfPresent(Float.self, forKey: .depthIntensity) ?? 0.04
         self.focalDepth = try container.decodeIfPresent(Float.self, forKey: .focalDepth) ?? 0.5
 
+        self.shaderName = try container.decodeIfPresent(String.self, forKey: .shaderName)
+        self.shaderPath = try container.decodeIfPresent(String.self, forKey: .shaderPath)
+        self.shaderSpeed = try container.decodeIfPresent(Float.self, forKey: .shaderSpeed) ?? 1.0
+
         self.displayConfigurations = try container.decodeIfPresent([String: DisplayConfig].self, forKey: .displayConfigurations) ?? [:]
     }
 
     public struct DisplayConfig: Codable, Equatable, Sendable {
         public var assetPath: String?
         public var photoPath: String?
+        public var shaderName: String?
+        public var shaderPath: String?
         public var scalingMode: ScalingMode
         public var isEnabled: Bool
         public var isMuted: Bool
@@ -132,12 +149,16 @@ public struct EngineConfig: Codable, Equatable, Sendable {
         public init(
             assetPath: String? = nil,
             photoPath: String? = nil,
+            shaderName: String? = nil,
+            shaderPath: String? = nil,
             scalingMode: ScalingMode = .aspectFill,
             isEnabled: Bool = true,
             isMuted: Bool = true
         ) {
             self.assetPath = assetPath
             self.photoPath = photoPath
+            self.shaderName = shaderName
+            self.shaderPath = shaderPath
             self.scalingMode = scalingMode
             self.isEnabled = isEnabled
             self.isMuted = isMuted
@@ -147,6 +168,8 @@ public struct EngineConfig: Codable, Equatable, Sendable {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             self.assetPath = try container.decodeIfPresent(String.self, forKey: .assetPath)
             self.photoPath = try container.decodeIfPresent(String.self, forKey: .photoPath)
+            self.shaderName = try container.decodeIfPresent(String.self, forKey: .shaderName)
+            self.shaderPath = try container.decodeIfPresent(String.self, forKey: .shaderPath)
             self.scalingMode = try container.decodeIfPresent(ScalingMode.self, forKey: .scalingMode) ?? .aspectFill
             self.isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
             self.isMuted = try container.decodeIfPresent(Bool.self, forKey: .isMuted) ?? true
