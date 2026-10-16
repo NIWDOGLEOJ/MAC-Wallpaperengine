@@ -66,6 +66,9 @@ await WebAndParticleTests.runAllTests()
 // --- Performance Profiles, Editor & Community Packaging Suites ---
 await ProfileAndPackageTests.runAllTests()
 
+// --- MotionBGs Online Discover & Integration Suites ---
+await MotionBGsDiscoverTests.runAllTests()
+
 // Conclude and return POSIX exit code (0 on success, 1 on failure)
 let exitCode = TestRunner.shared.printSummary()
 exit(exitCode)

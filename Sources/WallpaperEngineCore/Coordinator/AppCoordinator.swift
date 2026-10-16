@@ -1773,9 +1773,13 @@ public final class AppCoordinator: NSObject,
         if level == .warning {
             StaticWallpaperCache.shared.trim(toRatio: 0.5)
             WallpaperThumbnailCache.shared.clearMemoryCache()
+            MotionBGsThumbnailCache.shared.clearMemoryCache()
+            appState?.purgeDiscoverMemory()
         } else if level == .critical {
             StaticWallpaperCache.shared.clear()
             WallpaperThumbnailCache.shared.clearMemoryCache()
+            MotionBGsThumbnailCache.shared.clearMemoryCache()
+            appState?.teardownDiscover()
         }
         reconcileAllScreens()
     }

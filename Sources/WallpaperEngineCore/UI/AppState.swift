@@ -13,10 +13,18 @@ import SwiftUI
 
 public enum GalleryCategory: String, CaseIterable, Identifiable, Sendable {
     case all = "All"
+    case discover = "MotionBGs Discover"
     case shaders = "Metal Shaders"
     case parallax = "AI 3D Parallax"
     case videos = "Looping Videos"
     case custom = "Custom Code"
+
+    public var id: String { rawValue }
+}
+
+public enum GallerySectionMode: String, CaseIterable, Identifiable, Sendable {
+    case local = "Local & Shaders"
+    case discover = "Discover (MotionBGs)"
 
     public var id: String { rawValue }
 }
@@ -96,6 +104,26 @@ public final class AppState: ObservableObject {
     @Published public var activeWallpaperTheme: WallpaperTheme = .fallback
 
     // MARK: - Interactive UI View State (Stored in AppState to avoid Command Line Tools SwiftUI macro missing symbols)
+    private var _discoverViewModel: DiscoverViewModel? = nil
+    public var discoverViewModel: DiscoverViewModel {
+        if let existing = _discoverViewModel {
+            return existing
+        }
+        let vm = DiscoverViewModel()
+        _discoverViewModel = vm
+        return vm
+    }
+    public var isDiscoverViewModelLoaded: Bool {
+        _discoverViewModel != nil
+    }
+    public func purgeDiscoverMemory() {
+        _discoverViewModel?.clearThumbnails()
+    }
+    public func teardownDiscover() {
+        _discoverViewModel?.teardown()
+        _discoverViewModel = nil
+    }
+    @Published public var gallerySection: GallerySectionMode = .local
     @Published public var galleryCategory: GalleryCategory = .all
     @Published public var showingCustomShaderSheet: Bool = false
     @Published public var customShaderDraft: String = """

@@ -19,39 +19,62 @@ public struct GalleryView: View {
     }
 
     public var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                // Header Banner
-                headerView
+        VStack(spacing: 0) {
+            // Mode Switcher Banner
+            HStack {
+                Picker("Section", selection: $state.gallerySection) {
+                    Label("Discover (MotionBGs)", systemImage: "sparkles")
+                        .tag(GallerySectionMode.discover)
+                    Label("Local Library & Shaders", systemImage: "square.grid.2x2")
+                        .tag(GallerySectionMode.local)
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 380)
 
-                // Category Filter Bar
-                categoryFilterBar
+                Spacer()
+            }
+            .padding(.horizontal, 28)
+            .padding(.top, 16)
+            .padding(.bottom, 8)
 
-                // Cards Grid
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 280, maximum: 380), spacing: 20)], spacing: 20) {
-                    if state.galleryCategory == .all || state.galleryCategory == .shaders {
-                        ForEach(ProceduralShaderPreset.allCases) { preset in
-                            shaderCard(for: preset)
+            if state.gallerySection == .discover {
+                DiscoverView(state: state)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 24) {
+                        // Header Banner
+                        headerView
+
+                        // Category Filter Bar
+                        categoryFilterBar
+
+                        // Cards Grid
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 280, maximum: 380), spacing: 20)], spacing: 20) {
+                            if state.galleryCategory == .all || state.galleryCategory == .shaders {
+                                ForEach(ProceduralShaderPreset.allCases) { preset in
+                                    shaderCard(for: preset)
+                                }
+                            }
+
+                            if state.galleryCategory == .all || state.galleryCategory == .videos {
+                                ForEach(state.discoveredVideos) { videoItem in
+                                    discoveredVideoCard(for: videoItem)
+                                }
+                                videoPickerCard
+                            }
+
+                            if state.galleryCategory == .all || state.galleryCategory == .parallax {
+                                parallaxCard
+                            }
+
+                            if state.galleryCategory == .all || state.galleryCategory == .custom {
+                                customShaderCard
+                            }
                         }
                     }
-
-                    if state.galleryCategory == .all || state.galleryCategory == .videos {
-                        ForEach(state.discoveredVideos) { videoItem in
-                            discoveredVideoCard(for: videoItem)
-                        }
-                        videoPickerCard
-                    }
-
-                    if state.galleryCategory == .all || state.galleryCategory == .parallax {
-                        parallaxCard
-                    }
-
-                    if state.galleryCategory == .all || state.galleryCategory == .custom {
-                        customShaderCard
-                    }
+                    .padding(28)
                 }
             }
-            .padding(28)
         }
         .sheet(isPresented: $state.showingCustomShaderSheet) {
             customShaderSheet
@@ -125,7 +148,12 @@ public struct GalleryView: View {
     private var categoryFilterBar: some View {
         HStack(spacing: 8) {
             ForEach(GalleryCategory.allCases) { category in
-                Button(action: { state.galleryCategory = category }) {
+                Button(action: {
+                    state.galleryCategory = category
+                    if category == .discover {
+                        state.gallerySection = .discover
+                    }
+                }) {
                     Text(category.rawValue)
                         .font(.system(size: 13, weight: state.galleryCategory == category ? .semibold : .regular))
                         .padding(.horizontal, 14)
