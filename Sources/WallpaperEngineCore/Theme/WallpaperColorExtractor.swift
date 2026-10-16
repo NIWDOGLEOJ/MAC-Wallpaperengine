@@ -389,6 +389,33 @@ public final class WallpaperColorExtractor: WallpaperColorExtractorProtocol, @un
             }
             return NSColor(srgbRed: 0.35, green: 0.65, blue: 1.00, alpha: 1.0)
 
+        case .staticImage(let path):
+            cacheLock.lock()
+            if let cached = colorCache[path] {
+                cacheLock.unlock()
+                return cached
+            }
+            cacheLock.unlock()
+
+            let url = URL(fileURLWithPath: path)
+            if let extracted = extractAccentColor(fromImageAt: url) {
+                cacheLock.lock()
+                colorCache[path] = extracted
+                cacheLock.unlock()
+                return extracted
+            }
+            return NSColor(srgbRed: 0.35, green: 0.65, blue: 1.00, alpha: 1.0)
+
+        case .web:
+            return NSColor(srgbRed: 0.20, green: 0.70, blue: 0.95, alpha: 1.0)
+
+        case .particles(let scene):
+            switch scene {
+            case .rain: return NSColor(srgbRed: 0.40, green: 0.75, blue: 1.00, alpha: 1.0)
+            case .snow: return NSColor(srgbRed: 0.85, green: 0.92, blue: 1.00, alpha: 1.0)
+            case .ambientFireflies: return NSColor(srgbRed: 1.00, green: 0.85, blue: 0.30, alpha: 1.0)
+            }
+
         case .none:
             return NSColor.systemTeal
         }

@@ -337,6 +337,252 @@ public struct AppCoordinatorTests {
                 let activeShader = state.activeWallpaper(for: 1)
                 try assertEqual(activeShader, .shader(.starfield), "Display 1 active wallpaper detected as starfield shader")
             }
+
+            // Test 11: Coordinator setStaticImage Attachment & Mutual Exclusion
+            await runner.testAsync("setStaticImage attaches StaticWallpaperView and enforces mutual exclusivity") {
+
+                let storage = MockConfigStorage()
+                let windowManager = DesktopWindowManager(screenManager: MockScreenManager())
+                let videoEngine = VideoEngine(windowManager: nil)
+                let coordinator = AppCoordinator(
+                    configStorage: storage,
+                    windowManager: windowManager,
+                    videoEngine: videoEngine
+                )
+                coordinator.start()
+
+                let window = MockDesktopWindow(frame: CGRect(x: 0, y: 0, width: 1920, height: 1080), displayID: 1)
+                coordinator.desktopWindowManager(coordinator.windowManager, didAddWindow: window, for: 1)
+
+                let imgURL = URL(fileURLWithPath: "/tmp/static_test.png")
+                try await coordinator.setStaticImage(url: imgURL, for: 1, scalingMode: .aspectFill)
+
+                try assertNotNil(coordinator.staticWallpaperViews[1], "StaticWallpaperView attached to display 1")
+                try assertNil(coordinator.shaderViews[1], "Shader view nil")
+                try assertNil(coordinator.cpuWallpaperViews[1], "CPU view nil")
+                try assertNil(coordinator.parallaxViews[1], "Parallax view nil")
+                try assertNil(coordinator.webWallpaperViews[1], "Web view nil")
+                try assertNil(coordinator.particleViews[1], "Particle view nil")
+
+                coordinator.stop()
+            }
+
+            // Test 12: Coordinator setWebWallpaper Attachment
+            runner.test("setWebWallpaper attaches WebWallpaperView and records active wallpaper") {
+                let storage = MockConfigStorage()
+                let windowManager = DesktopWindowManager(screenManager: MockScreenManager())
+                let videoEngine = VideoEngine(windowManager: nil)
+                let coordinator = AppCoordinator(
+                    configStorage: storage,
+                    windowManager: windowManager,
+                    videoEngine: videoEngine
+                )
+                coordinator.start()
+
+                let window = MockDesktopWindow(frame: CGRect(x: 0, y: 0, width: 1920, height: 1080), displayID: 1)
+                coordinator.desktopWindowManager(coordinator.windowManager, didAddWindow: window, for: 1)
+
+                let webURL = URL(fileURLWithPath: "/tmp/wallpaper.html")
+                coordinator.setWebWallpaper(url: webURL, for: 1)
+
+                try assertNotNil(coordinator.webWallpaperViews[1], "WebWallpaperView attached to display 1")
+                try assertNil(coordinator.staticWallpaperViews[1], "Static view nil")
+                try assertNil(coordinator.shaderViews[1], "Shader view nil")
+
+                coordinator.stop()
+            }
+
+            // Test 13: Coordinator setParticles Attachment
+            runner.test("setParticles attaches InteractiveParticleWallpaperView") {
+                let storage = MockConfigStorage()
+                let windowManager = DesktopWindowManager(screenManager: MockScreenManager())
+                let videoEngine = VideoEngine(windowManager: nil)
+                let coordinator = AppCoordinator(
+                    configStorage: storage,
+                    windowManager: windowManager,
+                    videoEngine: videoEngine
+                )
+                coordinator.start()
+
+                let window = MockDesktopWindow(frame: CGRect(x: 0, y: 0, width: 1920, height: 1080), displayID: 1)
+                coordinator.desktopWindowManager(coordinator.windowManager, didAddWindow: window, for: 1)
+
+                coordinator.setParticles(scene: .rain, for: 1)
+
+                try assertNotNil(coordinator.particleViews[1], "InteractiveParticleWallpaperView attached to display 1")
+                try assertEqual(coordinator.particleViews[1]?.sceneType, .rain, "Particle scene type is rain")
+                try assertNil(coordinator.staticWallpaperViews[1], "Static view nil")
+
+                coordinator.stop()
+            }
+
+            // Test 14: Coordinator Multi-Monitor Spanning
+            runner.test("setSpanned updates config and sets normalized slices across static views") {
+                let storage = MockConfigStorage()
+                let windowManager = DesktopWindowManager(screenManager: MockScreenManager())
+                let videoEngine = VideoEngine(windowManager: nil)
+                let coordinator = AppCoordinator(
+                    configStorage: storage,
+                    windowManager: windowManager,
+                    videoEngine: videoEngine
+                )
+                coordinator.start()
+
+                coordinator.setSpanned(true)
+                try assertTrue(coordinator.config.isSpanned, "isSpanned is true in config")
+
+                coordinator.setSpanned(false)
+                try assertFalse(coordinator.config.isSpanned, "isSpanned is false in config")
+
+                coordinator.stop()
+            }
+
+            // Test 15: MemoryPressureDelegate Clears Cache and Reconciles
+            runner.test("MemoryPressureDelegate clears caches on warning and critical levels") {
+                let storage = MockConfigStorage()
+                let windowManager = DesktopWindowManager(screenManager: MockScreenManager())
+                let videoEngine = VideoEngine(windowManager: nil)
+                let coordinator = AppCoordinator(
+                    configStorage: storage,
+                    windowManager: windowManager,
+                    videoEngine: videoEngine
+                )
+                coordinator.start()
+
+                coordinator.memoryPressureDidChange(to: .warning)
+                try assertTrue(coordinator.isRunning, "Coordinator continues running after memory pressure warning")
+
+                coordinator.memoryPressureDidChange(to: .critical)
+                try assertTrue(coordinator.isRunning, "Coordinator continues running after memory pressure critical")
+
+                coordinator.stop()
+            }
+
+            // Test 16: Dynamic Multi-Monitor Topology Change during Spanning
+            await runner.testAsync("Dynamic screen topology changes while spanned recompute contentsRect across monitors") {
+                let storage = MockConfigStorage()
+                let screen1 = ScreenDescriptor(displayID: 1, name: "Screen 1", frame: CGRect(x: 0, y: 0, width: 1920, height: 1080), scaleFactor: 2.0, isMain: true, isBuiltin: true)
+                let screen2 = ScreenDescriptor(displayID: 2, name: "Screen 2", frame: CGRect(x: 1920, y: 0, width: 1920, height: 1080), scaleFactor: 2.0, isMain: false, isBuiltin: false)
+                let mockScreenMgr = MockScreenManager(screens: [screen1, screen2])
+                let windowManager = DesktopWindowManager(screenManager: mockScreenMgr)
+                let videoEngine = VideoEngine(windowManager: nil)
+                let coordinator = AppCoordinator(
+                    configStorage: storage,
+                    windowManager: windowManager,
+                    videoEngine: videoEngine
+                )
+                coordinator.start()
+
+                let window1 = MockDesktopWindow(frame: CGRect(x: 0, y: 0, width: 1920, height: 1080), displayID: 1)
+                let window2 = MockDesktopWindow(frame: CGRect(x: 1920, y: 0, width: 1920, height: 1080), displayID: 2)
+                coordinator.desktopWindowManager(coordinator.windowManager, didAddWindow: window1, for: 1)
+                coordinator.desktopWindowManager(coordinator.windowManager, didAddWindow: window2, for: 2)
+
+                // Attach static wallpaper to display 1 and display 2
+                let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("test_span_\(UUID().uuidString)")
+                try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+                defer { try? FileManager.default.removeItem(at: tempDir) }
+
+                let imgURL = tempDir.appendingPathComponent("span_test.png")
+                let colorSpace = CGColorSpaceCreateDeviceRGB()
+                let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
+                if let context = CGContext(data: nil, width: 64, height: 64, bitsPerComponent: 8, bytesPerRow: 256, space: colorSpace, bitmapInfo: bitmapInfo.rawValue),
+                   let image = context.makeImage(),
+                   let destination = CGImageDestinationCreateWithURL(imgURL as CFURL, "public.png" as CFString, 1, nil) {
+                    CGImageDestinationAddImage(destination, image, nil)
+                    CGImageDestinationFinalize(destination)
+                }
+
+                try await coordinator.setStaticImage(url: imgURL, for: 1, scalingMode: .aspectFill)
+                try await coordinator.setStaticImage(url: imgURL, for: 2, scalingMode: .aspectFill)
+
+                // Enable spanning
+                coordinator.setSpanned(true)
+
+                // On dual side-by-side (1920+1920 = 3840 wide), display 1 occupies [0, 0, 0.5, 1], display 2 occupies [0.5, 0, 0.5, 1]
+                let rect1Initial = coordinator.staticWallpaperViews[1]?.contentsRect
+                let rect2Initial = coordinator.staticWallpaperViews[2]?.contentsRect
+                try assertEqual(rect1Initial?.origin.x, 0.0, "Screen 1 starts at normalized x = 0.0")
+                try assertEqual(rect1Initial?.width, 0.5, "Screen 1 has normalized width 0.5")
+                try assertEqual(rect2Initial?.origin.x, 0.5, "Screen 2 starts at normalized x = 0.5")
+
+                // Now simulate screen 3 addition: Screen 3 at x: 3840, width: 1920
+                let screen3 = ScreenDescriptor(displayID: 3, name: "Screen 3", frame: CGRect(x: 3840, y: 0, width: 1920, height: 1080), scaleFactor: 2.0, isMain: false, isBuiltin: false)
+                mockScreenMgr.activeScreens = [screen1, screen2, screen3]
+                coordinator.displayConfigurationDidChange(added: [3], removed: [], updated: [])
+
+                // Now across 3 equal monitors, width is 1/3 ~ 0.3333
+                let rect1Updated = coordinator.staticWallpaperViews[1]?.contentsRect
+                try assertTrue(abs((rect1Updated?.width ?? 0) - (1.0 / 3.0)) < 0.01, "Screen 1 normalized width dynamically updated to ~0.333")
+
+                coordinator.stop()
+            }
+
+            // Test 17: applyProfile propagates rules to performanceRulesManager
+            runner.test("applyProfile propagates pauseOnFullscreen and pauseOnGame to performanceRulesManager") {
+                let storage = MockConfigStorage()
+                let windowManager = DesktopWindowManager(screenManager: MockScreenManager())
+                let videoEngine = VideoEngine(windowManager: nil)
+                let coordinator = AppCoordinator(
+                    configStorage: storage,
+                    windowManager: windowManager,
+                    videoEngine: videoEngine
+                )
+                coordinator.start()
+
+                var profile = EngineProfile(
+                    name: "Gaming Mode",
+                    type: .custom,
+                    targetFrameRate: 30,
+                    pauseOnBattery: true,
+                    pauseOnFullscreen: true,
+                    pauseOnGame: true
+                )
+
+                coordinator.applyProfile(profile)
+
+                try assertTrue(coordinator.performanceRulesManager.pauseOnFullscreen, "pauseOnFullscreen propagated")
+                try assertTrue(coordinator.performanceRulesManager.pauseOnGame, "pauseOnGame propagated")
+
+                profile.pauseOnFullscreen = false
+                profile.pauseOnGame = false
+                coordinator.applyProfile(profile)
+
+                try assertFalse(coordinator.performanceRulesManager.pauseOnFullscreen, "pauseOnFullscreen turned off")
+                try assertFalse(coordinator.performanceRulesManager.pauseOnGame, "pauseOnGame turned off")
+
+                coordinator.stop()
+            }
+
+            // Test 18: nowPlayingMonitor.isPollingEnabled pauses when displays are paused
+            runner.test("nowPlayingMonitor.isPollingEnabled automatically disables when all displays are paused") {
+                let storage = MockConfigStorage()
+                var cfg = EngineConfig.default
+                cfg.hudConfig.isEnabled = true
+                cfg.hudConfig.showNowPlaying = true
+                let coordinator = AppCoordinator(
+                    config: cfg,
+                    configStorage: storage
+                )
+                coordinator.start()
+
+                let window = MockDesktopWindow(frame: CGRect(x: 0, y: 0, width: 1920, height: 1080), displayID: 1)
+                coordinator.desktopWindowManager(coordinator.windowManager, didAddWindow: window, for: 1)
+
+                // Initially active
+                try assertTrue(coordinator.nowPlayingMonitor.isPollingEnabled, "Now playing polling initially enabled")
+
+                // Pause playback globally
+                coordinator.pause()
+                try assertFalse(coordinator.nowPlayingMonitor.isPollingEnabled, "Now playing polling disabled when paused")
+
+                // Resume playback globally
+                coordinator.resume()
+                try assertTrue(coordinator.nowPlayingMonitor.isPollingEnabled, "Now playing polling resumed when playback resumes")
+
+                coordinator.stop()
+            }
         }
     }
 }
+

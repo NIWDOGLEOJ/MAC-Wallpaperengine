@@ -15,6 +15,9 @@ public enum WallpaperSourceType: Equatable, Sendable {
     case applicationShader(preset: ProceduralShaderPreset)
     case applicationCustomShader(path: String)
     case applicationParallax(path: String)
+    case applicationStaticImage(path: String)
+    case applicationWeb(path: String)
+    case applicationParticles(ParticleSceneType)
     case systemDesktopImage(url: URL)
     case none
 }
@@ -114,6 +117,9 @@ public final class WallpaperMonitor {
         case .applicationShader(let preset): identifier = "shader:\(preset.rawValue)"
         case .applicationCustomShader(let path): identifier = "customShader:\(path)"
         case .applicationParallax(let path): identifier = "parallax:\(path)"
+        case .applicationStaticImage(let path): identifier = "image:\(path)"
+        case .applicationWeb(let path): identifier = "web:\(path)"
+        case .applicationParticles(let scene): identifier = "particles:\(scene.rawValue)"
         case .systemDesktopImage(let url): identifier = "system:\(url.path)"
         case .none: identifier = "none"
         }
@@ -137,7 +143,7 @@ public final class WallpaperMonitor {
             // Only check system desktop image if our engine is not actively driving a video/shader/parallax
             if let current = activeSources[screenNumber] {
                 switch current.type {
-                case .applicationVideo, .applicationShader, .applicationCustomShader, .applicationParallax:
+                case .applicationVideo, .applicationShader, .applicationCustomShader, .applicationParallax, .applicationStaticImage, .applicationWeb, .applicationParticles:
                     continue
                 default:
                     break

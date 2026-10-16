@@ -170,11 +170,22 @@ public final class NowPlayingMonitor: @unchecked Sendable {
         updateTrack(info)
     }
 
-    // MARK: - Background Polling
+    // MARK: - Background Polling & Event Handling
+
+    public var isPollingEnabled: Bool = false {
+        didSet {
+            if isPollingEnabled {
+                startPolling()
+            } else {
+                stopPolling()
+            }
+        }
+    }
 
     private func startPolling() {
+        guard pollTimer == nil else { return }
         let timer = DispatchSource.makeTimerSource(queue: pollQueue)
-        timer.schedule(deadline: .now() + .seconds(2), repeating: .seconds(3))
+        timer.schedule(deadline: .now() + .seconds(5), repeating: .seconds(15))
         timer.setEventHandler { [weak self] in
             self?.queryCurrentTrack()
         }
@@ -182,23 +193,38 @@ public final class NowPlayingMonitor: @unchecked Sendable {
         self.pollTimer = timer
     }
 
+    private func stopPolling() {
+        pollTimer?.cancel()
+        pollTimer = nil
+    }
+
     public func queryCurrentTrack() {
         pollQueue.async { [weak self] in
             guard let self = self else { return }
 
+            let spotifyRunning = !NSRunningApplication.runningApplications(withBundleIdentifier: "com.spotify.client").isEmpty
+            let musicRunning = !NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.Music").isEmpty
+
+            guard spotifyRunning || musicRunning else {
+                if self.currentTrack != nil {
+                    self.updateTrack(nil)
+                }
+                return
+            }
+
             // 1. Check Spotify if running
-            if let spotifyInfo = self.querySpotifyScript() {
+            if spotifyRunning, let spotifyInfo = self.querySpotifyScript() {
                 self.updateTrack(spotifyInfo)
                 return
             }
 
             // 2. Check Apple Music if running
-            if let musicInfo = self.queryAppleMusicScript() {
+            if musicRunning, let musicInfo = self.queryAppleMusicScript() {
                 self.updateTrack(musicInfo)
                 return
             }
 
-            // No active media player running
+            // No active media playing
             self.updateTrack(nil)
         }
     }

@@ -24,7 +24,11 @@ public struct StateEvaluator: Sendable {
         sleepLock: SleepLockState,
         power: PowerState,
         isDisplayVisible: Bool,
-        config: EngineConfig
+        config: EngineConfig,
+        isFullscreen: Bool = false,
+        isGameActive: Bool = false,
+        isIdle: Bool = false,
+        memoryPressure: MemoryPressureLevel = .normal
     ) -> PlaybackDecision {
         var pauseReasons = Set<PauseReason>()
 
@@ -61,7 +65,20 @@ public struct StateEvaluator: Sendable {
             pauseReasons.insert(.thermalPressure)
         }
 
-        // 4. Display Occlusion (per-display evaluation)
+        // 4. Memory Pressure Protection
+        if memoryPressure == .critical {
+            pauseReasons.insert(.memoryPressure)
+        }
+
+        // 5. Fullscreen App & Game Suspension
+        if isFullscreen {
+            pauseReasons.insert(.fullscreenApp)
+        }
+        if isGameActive {
+            pauseReasons.insert(.gameActive)
+        }
+
+        // 6. Display Occlusion (per-display evaluation)
         if !isDisplayVisible && config.pauseWhenOccluded {
             pauseReasons.insert(.displayOccluded)
         }
@@ -80,6 +97,9 @@ public struct StateEvaluator: Sendable {
         if power.thermalState == .serious {
             throttleReasons.insert(.thermalPressure)
         }
+        if isIdle {
+            throttleReasons.insert(.desktopIdle)
+        }
 
         if !throttleReasons.isEmpty {
             return .throttle(fps: config.throttledFrameRate, reasons: throttleReasons)
@@ -95,18 +115,29 @@ public struct StateEvaluator: Sendable {
         sleepLock: SleepLockState,
         power: PowerState,
         displays: [CGDirectDisplayID: Bool],
-        config: EngineConfig
+        config: EngineConfig,
+        fullscreenDisplays: Set<CGDirectDisplayID> = [],
+        isGameActive: Bool = false,
+        isIdle: Bool = false,
+        memoryPressure: MemoryPressureLevel = .normal
     ) -> [CGDirectDisplayID: PlaybackDecision] {
         var decisions: [CGDirectDisplayID: PlaybackDecision] = [:]
+
         for (displayID, isVisible) in displays {
+            let isFs = fullscreenDisplays.contains(displayID)
             decisions[displayID] = evaluate(
                 manualPause: manualPause,
                 sleepLock: sleepLock,
                 power: power,
                 isDisplayVisible: isVisible,
-                config: config
+                config: config,
+                isFullscreen: isFs,
+                isGameActive: isGameActive,
+                isIdle: isIdle,
+                memoryPressure: memoryPressure
             )
         }
+
         return decisions
     }
 }

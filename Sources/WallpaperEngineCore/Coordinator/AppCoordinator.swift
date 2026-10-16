@@ -27,10 +27,20 @@ public protocol AppCoordinatorProtocol: AnyObject {
     var parallaxViews: [CGDirectDisplayID: ParallaxWallpaperView] { get }
     var shaderViews: [CGDirectDisplayID: ShaderWallpaperView] { get }
     var cpuWallpaperViews: [CGDirectDisplayID: CPULiveWallpaperView] { get }
+    var staticWallpaperViews: [CGDirectDisplayID: StaticWallpaperView] { get }
+    var webWallpaperViews: [CGDirectDisplayID: WebWallpaperView] { get }
+    var particleViews: [CGDirectDisplayID: InteractiveParticleWallpaperView] { get }
     var hudViews: [CGDirectDisplayID: DesktopHUDView] { get }
     var audioCapture: SystemAudioCapture { get }
     var nowPlayingMonitor: NowPlayingMonitor { get }
     var telemetryMonitor: SystemTelemetryMonitor { get }
+    var memoryPressureMonitor: MemoryPressureMonitor { get }
+    var performanceRulesManager: PerformanceRulesManager { get }
+    var libraryManager: WallpaperLibraryManager { get }
+    var playlistManager: WallpaperPlaylistManager { get }
+    var profileManager: ProfileManager { get }
+    var editor: WallpaperEditor { get }
+    var displaySpanManager: DisplaySpanManager { get }
     var appState: AppState? { get }
     var mainWindowController: MainWindowController? { get }
     var themeManager: ThemeManager { get }
@@ -45,6 +55,11 @@ public protocol AppCoordinatorProtocol: AnyObject {
     func setVideo(url: URL, for displayID: CGDirectDisplayID?) async throws
     func setPhoto(url: URL, for displayID: CGDirectDisplayID?, useHeadTracking: Bool?) async throws
     func setParallaxPhoto(url: URL, for displayID: CGDirectDisplayID?, useHeadTracking: Bool?)
+    func setStaticImage(url: URL, for displayID: CGDirectDisplayID?, scalingMode: StaticWallpaperView.ScalingMode) async throws
+    func setWebWallpaper(url: URL, for displayID: CGDirectDisplayID?, allowNetwork: Bool)
+    func setParticles(scene: ParticleSceneType, for displayID: CGDirectDisplayID?)
+    func setSpanned(_ spanned: Bool)
+    func applyProfile(_ profile: EngineProfile)
     func setShader(preset: ProceduralShaderPreset, for displayID: CGDirectDisplayID?, speed: Float?)
     func setShader(url: URL, for displayID: CGDirectDisplayID?, speed: Float?)
     func attachOrUpdateHUD(for displayID: CGDirectDisplayID, in window: DesktopWindowProtocol)
@@ -66,7 +81,10 @@ public final class AppCoordinator: NSObject,
     SleepLockObserverDelegate,
     OcclusionManagerDelegate,
     VideoEngineDelegate,
-    MenuBarControllerDelegate
+    MenuBarControllerDelegate,
+    MemoryPressureDelegate,
+    PerformanceRulesDelegate,
+    WallpaperPlaylistDelegate
 {
     public private(set) var isRunning: Bool = false
     public private(set) var config: EngineConfig
@@ -83,10 +101,20 @@ public final class AppCoordinator: NSObject,
     public private(set) var parallaxViews: [CGDirectDisplayID: ParallaxWallpaperView] = [:]
     public private(set) var shaderViews: [CGDirectDisplayID: ShaderWallpaperView] = [:]
     public private(set) var cpuWallpaperViews: [CGDirectDisplayID: CPULiveWallpaperView] = [:]
+    public private(set) var staticWallpaperViews: [CGDirectDisplayID: StaticWallpaperView] = [:]
+    public private(set) var webWallpaperViews: [CGDirectDisplayID: WebWallpaperView] = [:]
+    public private(set) var particleViews: [CGDirectDisplayID: InteractiveParticleWallpaperView] = [:]
     public private(set) var hudViews: [CGDirectDisplayID: DesktopHUDView] = [:]
     public let audioCapture: SystemAudioCapture
     public let nowPlayingMonitor: NowPlayingMonitor
     public let telemetryMonitor: SystemTelemetryMonitor
+    public let memoryPressureMonitor: MemoryPressureMonitor
+    public let performanceRulesManager: PerformanceRulesManager
+    public let libraryManager: WallpaperLibraryManager
+    public let playlistManager: WallpaperPlaylistManager
+    public let profileManager: ProfileManager
+    public let editor: WallpaperEditor
+    public let displaySpanManager: DisplaySpanManager
     public let themeManager: ThemeManager
     public private(set) var appState: AppState?
     public private(set) var mainWindowController: MainWindowController?
@@ -110,7 +138,9 @@ public final class AppCoordinator: NSObject,
         audioCapture: SystemAudioCapture = SystemAudioCapture(),
         nowPlayingMonitor: NowPlayingMonitor = NowPlayingMonitor(),
         telemetryMonitor: SystemTelemetryMonitor = SystemTelemetryMonitor(),
-        cliOptions: CommandLineOptions? = nil
+        cliOptions: CommandLineOptions? = nil,
+        performanceRulesManager: PerformanceRulesManager? = nil,
+        memoryPressureMonitor: MemoryPressureMonitor? = nil
     ) {
         var resolvedConfig = config ?? configStorage.load() ?? EngineConfig.default
 
@@ -130,6 +160,13 @@ public final class AppCoordinator: NSObject,
         self.nowPlayingMonitor = nowPlayingMonitor
         self.telemetryMonitor = telemetryMonitor
         self.telemetryMonitor.isCPUOnlyMode = resolvedConfig.useCPUOnlyEngine
+        self.memoryPressureMonitor = memoryPressureMonitor ?? MemoryPressureMonitor()
+        self.performanceRulesManager = performanceRulesManager ?? PerformanceRulesManager()
+        self.libraryManager = WallpaperLibraryManager()
+        self.playlistManager = WallpaperPlaylistManager()
+        self.profileManager = ProfileManager()
+        self.editor = WallpaperEditor()
+        self.displaySpanManager = DisplaySpanManager.shared
         self.themeManager = ThemeManager(settings: resolvedConfig.hudConfig.themeSettings)
         self.currentPowerState = powerObserver.currentState
         self.currentSleepLockState = sleepLockObserver.currentState
@@ -160,6 +197,9 @@ public final class AppCoordinator: NSObject,
         self.sleepLockObserver.delegate = self
         self.occlusionManager.delegate = self
         self.videoEngine.delegate = self
+        self.memoryPressureMonitor.delegate = self
+        self.performanceRulesManager.delegate = self
+        self.playlistManager.delegate = self
         self.menuBarController?.delegate = self
 
         // Wire ThemeManager Callbacks
@@ -260,14 +300,20 @@ public final class AppCoordinator: NSObject,
             attachDisplay(displayID: displayID, window: window)
         }
 
-        // 5. Start Power & Sleep/Lock Observers
+        // 5. Start Power & Sleep/Lock Observers, Rules & Memory Pressure
         powerObserver.start()
         sleepLockObserver.start()
+        memoryPressureMonitor.start()
+        if !isHeadless {
+            performanceRulesManager.start()
+        }
         self.currentPowerState = powerObserver.currentState
         self.currentSleepLockState = sleepLockObserver.currentState
 
         // 6. Start Audio Capture, Media & Telemetry Monitors
-        audioCapture.start()
+        if config.isAudioReactive {
+            audioCapture.start()
+        }
         nowPlayingMonitor.start()
         telemetryMonitor.start()
 
@@ -285,12 +331,16 @@ public final class AppCoordinator: NSObject,
         isRunning = false
         logger.info("Stopping AppCoordinator...")
 
-        // 0. Halt Dynamic Wallpaper Theme Manager
+        // 0. Halt Dynamic Wallpaper Theme Manager & Playlists
         themeManager.stop()
+        playlistManager.stop()
+        editor.stopPreview()
 
         // 1. Halt observers to prevent callbacks during teardown
         powerObserver.stop()
         sleepLockObserver.stop()
+        memoryPressureMonitor.stop()
+        performanceRulesManager.stop()
 
         // 2. Halt audio & telemetry monitors
         audioCapture.stop()
@@ -324,6 +374,24 @@ public final class AppCoordinator: NSObject,
             cView.removeFromSuperview()
         }
         cpuWallpaperViews.removeAll()
+
+        for (_, stView) in staticWallpaperViews {
+            stView.clear()
+            stView.removeFromSuperview()
+        }
+        staticWallpaperViews.removeAll()
+
+        for (_, wView) in webWallpaperViews {
+            wView.teardownWebView()
+            wView.removeFromSuperview()
+        }
+        webWallpaperViews.removeAll()
+
+        for (_, ptView) in particleViews {
+            ptView.stopRenderLoop()
+            ptView.removeFromSuperview()
+        }
+        particleViews.removeAll()
 
         for (_, hView) in hudViews {
             hView.removeFromSuperview()
@@ -364,7 +432,21 @@ public final class AppCoordinator: NSObject,
 
         // 1. Resolve display-specific configuration first
         if let dCfg = dispConfig {
-            if let sName = dCfg.shaderName, let preset = ProceduralShaderPreset(rawValue: sName) {
+            if let iPath = dCfg.staticImagePath, FileManager.default.fileExists(atPath: iPath) {
+                let iURL = URL(fileURLWithPath: iPath)
+                attachStaticImage(to: window, displayID: displayID, imageURL: iURL)
+                attachOrUpdateHUD(for: displayID, in: window)
+                return
+            } else if let wPath = dCfg.webPath, FileManager.default.fileExists(atPath: wPath) {
+                let wURL = URL(fileURLWithPath: wPath)
+                attachWeb(to: window, displayID: displayID, htmlURL: wURL)
+                attachOrUpdateHUD(for: displayID, in: window)
+                return
+            } else if let pScene = dCfg.particleSceneName, let scene = ParticleSceneType(rawValue: pScene) {
+                attachParticles(to: window, displayID: displayID, sceneType: scene)
+                attachOrUpdateHUD(for: displayID, in: window)
+                return
+            } else if let sName = dCfg.shaderName, let preset = ProceduralShaderPreset(rawValue: sName) {
                 attachShader(to: window, displayID: displayID, preset: preset)
                 attachOrUpdateHUD(for: displayID, in: window)
                 return
@@ -392,7 +474,21 @@ public final class AppCoordinator: NSObject,
         }
 
         // 2. Fall back to global configuration
-        if let sName = config.shaderName, let preset = ProceduralShaderPreset(rawValue: sName) {
+        if let iPath = config.staticImagePath, FileManager.default.fileExists(atPath: iPath) {
+            let iURL = URL(fileURLWithPath: iPath)
+            attachStaticImage(to: window, displayID: displayID, imageURL: iURL)
+            attachOrUpdateHUD(for: displayID, in: window)
+            return
+        } else if let wPath = config.webPath, FileManager.default.fileExists(atPath: wPath) {
+            let wURL = URL(fileURLWithPath: wPath)
+            attachWeb(to: window, displayID: displayID, htmlURL: wURL)
+            attachOrUpdateHUD(for: displayID, in: window)
+            return
+        } else if let pScene = config.particleSceneName, let scene = ParticleSceneType(rawValue: pScene) {
+            attachParticles(to: window, displayID: displayID, sceneType: scene)
+            attachOrUpdateHUD(for: displayID, in: window)
+            return
+        } else if let sName = config.shaderName, let preset = ProceduralShaderPreset(rawValue: sName) {
             attachShader(to: window, displayID: displayID, preset: preset)
             attachOrUpdateHUD(for: displayID, in: window)
             return
@@ -455,11 +551,29 @@ public final class AppCoordinator: NSObject,
     }
 
     public func activeWallpaperType(for displayID: CGDirectDisplayID) -> ActiveWallpaperType {
+        if let sView = staticWallpaperViews[displayID], let path = sView.currentImageURL?.path {
+            return .staticImage(path: path)
+        }
+        if let wView = webWallpaperViews[displayID], let path = wView.currentURL?.path {
+            return .web(path: path)
+        }
+        if let ptView = particleViews[displayID] {
+            return .particles(ptView.sceneType)
+        }
         if let cpuView = cpuWallpaperViews[displayID] {
             return .shader(cpuView.currentPreset)
         }
         let key = String(displayID)
         if let disp = config.displayConfigurations[key] {
+            if let iPath = disp.staticImagePath {
+                return .staticImage(path: iPath)
+            }
+            if let wPath = disp.webPath {
+                return .web(path: wPath)
+            }
+            if let pScene = disp.particleSceneName, let scene = ParticleSceneType(rawValue: pScene) {
+                return .particles(scene)
+            }
             if let sName = disp.shaderName, let preset = ProceduralShaderPreset(rawValue: sName) {
                 return .shader(preset)
             }
@@ -472,6 +586,15 @@ public final class AppCoordinator: NSObject,
             if let vPath = disp.assetPath {
                 return .video(path: vPath)
             }
+        }
+        if let iPath = config.staticImagePath {
+            return .staticImage(path: iPath)
+        }
+        if let wPath = config.webPath {
+            return .web(path: wPath)
+        }
+        if let pScene = config.particleSceneName, let scene = ParticleSceneType(rawValue: pScene) {
+            return .particles(scene)
         }
         if let sName = config.shaderName, let preset = ProceduralShaderPreset(rawValue: sName) {
             return .shader(preset)
@@ -499,6 +622,12 @@ public final class AppCoordinator: NSObject,
             return .applicationParallax(path: path)
         case .video(let path):
             return .applicationVideo(path: path)
+        case .staticImage(let path):
+            return .applicationStaticImage(path: path)
+        case .web(let path):
+            return .applicationWeb(path: path)
+        case .particles(let scene):
+            return .applicationParticles(scene)
         case .none:
             if let screen = windowManager.screenManager.screen(for: displayID),
                let url = NSWorkspace.shared.desktopImageURL(for: screen) {
@@ -513,35 +642,54 @@ public final class AppCoordinator: NSObject,
         themeManager.monitor.notifyApplicationWallpaperChange(displayID: displayID, type: sourceType)
     }
 
+    private func cleanDisplayRenderers(displayID: CGDirectDisplayID) {
+        if let sView = shaderViews[displayID] {
+            sView.pause()
+            sView.removeFromSuperview()
+            shaderViews.removeValue(forKey: displayID)
+        }
+        if let cView = cpuWallpaperViews[displayID] {
+            cView.pause()
+            cView.removeFromSuperview()
+            cpuWallpaperViews.removeValue(forKey: displayID)
+        }
+        if let pView = parallaxViews[displayID] {
+            pView.pause()
+            pView.removeFromSuperview()
+            parallaxViews.removeValue(forKey: displayID)
+        }
+        if let stView = staticWallpaperViews[displayID] {
+            stView.clear()
+            stView.removeFromSuperview()
+            staticWallpaperViews.removeValue(forKey: displayID)
+        }
+        if let wView = webWallpaperViews[displayID] {
+            wView.teardownWebView()
+            wView.removeFromSuperview()
+            webWallpaperViews.removeValue(forKey: displayID)
+        }
+        if let ptView = particleViews[displayID] {
+            ptView.stopRenderLoop()
+            ptView.removeFromSuperview()
+            particleViews.removeValue(forKey: displayID)
+        }
+    }
+
     private func attachCPUShader(to window: DesktopWindowProtocol, displayID: CGDirectDisplayID, preset: ProceduralShaderPreset) {
         window.removePlayerLayer()
         videoEngine.setPlaybackState(.paused(reason: .userRequested), for: displayID)
 
-        shaderViews[displayID]?.pause()
-        shaderViews[displayID]?.removeFromSuperview()
-        shaderViews.removeValue(forKey: displayID)
+        cleanDisplayRenderers(displayID: displayID)
 
-        parallaxViews[displayID]?.pause()
-        parallaxViews[displayID]?.removeFromSuperview()
-        parallaxViews.removeValue(forKey: displayID)
+        let frame = window.underlyingWindow.contentView?.bounds ?? window.frame
+        let cpuView = CPULiveWallpaperView(frame: frame, preset: preset)
+        cpuView.autoresizingMask = [.width, .height]
+        cpuView.setSpeed(config.shaderSpeed)
+        cpuView.setTargetFrameRate(min(config.targetFrameRate, 30))
 
-        if let existing = cpuWallpaperViews[displayID] {
-            existing.loadPreset(preset)
-            existing.setSpeed(config.shaderSpeed)
-            existing.setTargetFrameRate(min(config.targetFrameRate, 30))
-            existing.resume()
-            logger.info("Updated CPU live wallpaper to '\(preset.displayName)' on display \(displayID)")
-        } else {
-            let frame = window.underlyingWindow.contentView?.bounds ?? window.frame
-            let cpuView = CPULiveWallpaperView(frame: frame, preset: preset)
-            cpuView.autoresizingMask = [.width, .height]
-            cpuView.setSpeed(config.shaderSpeed)
-            cpuView.setTargetFrameRate(min(config.targetFrameRate, 30))
-
-            window.underlyingWindow.contentView?.addSubview(cpuView)
-            cpuWallpaperViews[displayID] = cpuView
-            logger.info("CPU live wallpaper '\(preset.displayName)' attached to display \(displayID)")
-        }
+        window.underlyingWindow.contentView?.addSubview(cpuView)
+        cpuWallpaperViews[displayID] = cpuView
+        logger.info("CPU live wallpaper '\(preset.displayName)' attached to display \(displayID)")
 
         if let hView = hudViews[displayID] {
             window.underlyingWindow.contentView?.addSubview(hView)
@@ -555,42 +703,24 @@ public final class AppCoordinator: NSObject,
             return
         }
 
-        cpuWallpaperViews[displayID]?.pause()
-        cpuWallpaperViews[displayID]?.removeFromSuperview()
-        cpuWallpaperViews.removeValue(forKey: displayID)
-
         window.removePlayerLayer()
         videoEngine.setPlaybackState(.paused(reason: .userRequested), for: displayID)
 
-        parallaxViews[displayID]?.pause()
-        parallaxViews[displayID]?.removeFromSuperview()
-        parallaxViews.removeValue(forKey: displayID)
+        cleanDisplayRenderers(displayID: displayID)
 
-        if let existing = shaderViews[displayID] {
-            do {
-                try existing.loadPreset(preset)
-                existing.setSpeed(config.shaderSpeed)
-                existing.setTargetFrameRate(config.targetFrameRate)
-                existing.resume()
-                logger.info("Updated procedural shader to '\(preset.displayName)' on display \(displayID)")
-            } catch {
-                logger.error("Failed to update preset '\(preset.displayName)': \(error.localizedDescription)")
-            }
-        } else {
-            let frame = window.underlyingWindow.contentView?.bounds ?? window.frame
-            let shaderView = ShaderWallpaperView(frame: frame)
-            shaderView.autoresizingMask = [.width, .height]
-            shaderView.setSpeed(config.shaderSpeed)
-            shaderView.setTargetFrameRate(config.targetFrameRate)
+        let frame = window.underlyingWindow.contentView?.bounds ?? window.frame
+        let shaderView = ShaderWallpaperView(frame: frame)
+        shaderView.autoresizingMask = [.width, .height]
+        shaderView.setSpeed(config.shaderSpeed)
+        shaderView.setTargetFrameRate(config.targetFrameRate)
 
-            do {
-                try shaderView.loadPreset(preset)
-                window.underlyingWindow.contentView?.addSubview(shaderView)
-                shaderViews[displayID] = shaderView
-                logger.info("Procedural shader '\(preset.displayName)' attached to display \(displayID)")
-            } catch {
-                logger.error("Failed to load procedural preset '\(preset.displayName)': \(error.localizedDescription)")
-            }
+        do {
+            try shaderView.loadPreset(preset)
+            window.underlyingWindow.contentView?.addSubview(shaderView)
+            shaderViews[displayID] = shaderView
+            logger.info("Procedural shader '\(preset.displayName)' attached to display \(displayID)")
+        } catch {
+            logger.error("Failed to load procedural preset '\(preset.displayName)': \(error.localizedDescription)")
         }
 
         if let hView = hudViews[displayID] {
@@ -600,42 +730,24 @@ public final class AppCoordinator: NSObject,
     }
 
     private func attachShader(to window: DesktopWindowProtocol, displayID: CGDirectDisplayID, fileURL: URL) {
-        cpuWallpaperViews[displayID]?.pause()
-        cpuWallpaperViews[displayID]?.removeFromSuperview()
-        cpuWallpaperViews.removeValue(forKey: displayID)
-
         window.removePlayerLayer()
         videoEngine.setPlaybackState(.paused(reason: .userRequested), for: displayID)
 
-        parallaxViews[displayID]?.pause()
-        parallaxViews[displayID]?.removeFromSuperview()
-        parallaxViews.removeValue(forKey: displayID)
+        cleanDisplayRenderers(displayID: displayID)
 
-        if let existing = shaderViews[displayID] {
-            do {
-                try existing.loadShader(from: fileURL)
-                existing.setSpeed(config.shaderSpeed)
-                existing.setTargetFrameRate(config.targetFrameRate)
-                existing.resume()
-                logger.info("Updated custom shader from '\(fileURL.lastPathComponent)' on display \(displayID)")
-            } catch {
-                logger.error("Failed to reload custom shader from \(fileURL.path): \(error.localizedDescription)")
-            }
-        } else {
-            let frame = window.underlyingWindow.contentView?.bounds ?? window.frame
-            let shaderView = ShaderWallpaperView(frame: frame)
-            shaderView.autoresizingMask = [.width, .height]
-            shaderView.setSpeed(config.shaderSpeed)
-            shaderView.setTargetFrameRate(config.targetFrameRate)
+        let frame = window.underlyingWindow.contentView?.bounds ?? window.frame
+        let shaderView = ShaderWallpaperView(frame: frame)
+        shaderView.autoresizingMask = [.width, .height]
+        shaderView.setSpeed(config.shaderSpeed)
+        shaderView.setTargetFrameRate(config.targetFrameRate)
 
-            do {
-                try shaderView.loadShader(from: fileURL)
-                window.underlyingWindow.contentView?.addSubview(shaderView)
-                shaderViews[displayID] = shaderView
-                logger.info("Custom shader '\(fileURL.lastPathComponent)' attached to display \(displayID)")
-            } catch {
-                logger.error("Failed to load custom shader from \(fileURL.path): \(error.localizedDescription)")
-            }
+        do {
+            try shaderView.loadShader(from: fileURL)
+            window.underlyingWindow.contentView?.addSubview(shaderView)
+            shaderViews[displayID] = shaderView
+            logger.info("Custom shader '\(fileURL.lastPathComponent)' attached to display \(displayID)")
+        } catch {
+            logger.error("Failed to load custom shader from \(fileURL.path): \(error.localizedDescription)")
         }
 
         if let hView = hudViews[displayID] {
@@ -645,19 +757,10 @@ public final class AppCoordinator: NSObject,
     }
 
     private func attachParallax(to window: DesktopWindowProtocol, displayID: CGDirectDisplayID, photoURL: URL) {
-        cpuWallpaperViews[displayID]?.pause()
-        cpuWallpaperViews[displayID]?.removeFromSuperview()
-        cpuWallpaperViews.removeValue(forKey: displayID)
-
         window.removePlayerLayer()
         videoEngine.setPlaybackState(.paused(reason: .userRequested), for: displayID)
 
-        shaderViews[displayID]?.pause()
-        shaderViews[displayID]?.removeFromSuperview()
-        shaderViews.removeValue(forKey: displayID)
-
-        parallaxViews[displayID]?.pause()
-        parallaxViews[displayID]?.removeFromSuperview()
+        cleanDisplayRenderers(displayID: displayID)
 
         let frame = window.underlyingWindow.contentView?.bounds ?? window.frame
         let parallaxView = ParallaxWallpaperView(frame: frame)
@@ -689,6 +792,100 @@ public final class AppCoordinator: NSObject,
         }
     }
 
+    private func attachStaticImage(
+        to window: DesktopWindowProtocol,
+        displayID: CGDirectDisplayID,
+        imageURL: URL,
+        scalingMode: StaticWallpaperView.ScalingMode = .aspectFill
+    ) {
+        window.removePlayerLayer()
+        videoEngine.setPlaybackState(.paused(reason: .userRequested), for: displayID)
+
+        cleanDisplayRenderers(displayID: displayID)
+
+        let frame = window.underlyingWindow.contentView?.bounds ?? window.frame
+        let staticView = StaticWallpaperView(frame: frame)
+        staticView.autoresizingMask = [.width, .height]
+
+        if config.isSpanned {
+            staticView.scalingMode = .stretch
+            let screenFrames = windowManager.screenManager.activeScreens.reduce(into: [CGDirectDisplayID: CGRect]()) { dict, screen in
+                dict[screen.displayID] = screen.frame
+            }
+            staticView.contentsRect = displaySpanManager.normalizedContentsRect(for: displayID, allScreens: screenFrames)
+        } else {
+            staticView.scalingMode = scalingMode
+            staticView.contentsRect = CGRect(x: 0, y: 0, width: 1, height: 1)
+        }
+
+        window.underlyingWindow.contentView?.addSubview(staticView)
+        staticWallpaperViews[displayID] = staticView
+
+        Task { @MainActor [weak self] in
+            do {
+                _ = try await staticView.loadWallpaper(from: imageURL)
+                self?.logger.info("Static image wallpaper attached to display \(displayID)")
+            } catch {
+                self?.logger.error("Failed to load static image on display \(displayID): \(error.localizedDescription)")
+            }
+        }
+
+        if let hView = hudViews[displayID] {
+            window.underlyingWindow.contentView?.addSubview(hView)
+        }
+        syncWallpaperAccentColor(for: displayID)
+    }
+
+    private func attachWeb(
+        to window: DesktopWindowProtocol,
+        displayID: CGDirectDisplayID,
+        htmlURL: URL,
+        allowNetwork: Bool = false
+    ) {
+        window.removePlayerLayer()
+        videoEngine.setPlaybackState(.paused(reason: .userRequested), for: displayID)
+
+        cleanDisplayRenderers(displayID: displayID)
+
+        let frame = window.underlyingWindow.contentView?.bounds ?? window.frame
+        let webView = WebWallpaperView(frame: frame)
+        webView.autoresizingMask = [.width, .height]
+
+        window.underlyingWindow.contentView?.addSubview(webView)
+        webWallpaperViews[displayID] = webView
+
+        webView.loadWebWallpaper(from: htmlURL, allowNetwork: allowNetwork)
+
+        if let hView = hudViews[displayID] {
+            window.underlyingWindow.contentView?.addSubview(hView)
+        }
+        syncWallpaperAccentColor(for: displayID)
+    }
+
+    private func attachParticles(
+        to window: DesktopWindowProtocol,
+        displayID: CGDirectDisplayID,
+        sceneType: ParticleSceneType
+    ) {
+        window.removePlayerLayer()
+        videoEngine.setPlaybackState(.paused(reason: .userRequested), for: displayID)
+
+        cleanDisplayRenderers(displayID: displayID)
+
+        let frame = window.underlyingWindow.contentView?.bounds ?? window.frame
+        let particleView = InteractiveParticleWallpaperView(frame: frame, sceneType: sceneType)
+        particleView.autoresizingMask = [.width, .height]
+
+        window.underlyingWindow.contentView?.addSubview(particleView)
+        particleViews[displayID] = particleView
+
+        if let hView = hudViews[displayID] {
+            window.underlyingWindow.contentView?.addSubview(hView)
+        }
+        syncWallpaperAccentColor(for: displayID)
+    }
+
+
     // MARK: - State Reconciliation
 
     public func reconcileAllScreens() {
@@ -705,7 +902,11 @@ public final class AppCoordinator: NSObject,
             sleepLock: currentSleepLockState,
             power: currentPowerState,
             displays: displayVisibilities,
-            config: config
+            config: config,
+            fullscreenDisplays: isHeadless ? [] : (performanceRulesManager.pauseOnFullscreen ? performanceRulesManager.fullscreenDisplays : []),
+            isGameActive: isHeadless ? false : (performanceRulesManager.pauseOnGame && performanceRulesManager.isGameActive),
+            isIdle: isHeadless ? false : (performanceRulesManager.pauseOnIdle && performanceRulesManager.isDesktopIdle),
+            memoryPressure: memoryPressureMonitor.currentLevel
         )
 
         for (displayID, decision) in decisions {
@@ -715,13 +916,35 @@ public final class AppCoordinator: NSObject,
             }
         }
 
+        let anyPlaying = decisions.values.contains {
+            if case .play = $0 { return true }
+            if case .throttle = $0 { return true }
+            return false
+        }
+        if !anyPlaying {
+            audioCapture.pause()
+            nowPlayingMonitor.isPollingEnabled = false
+        } else {
+            if config.isAudioReactive {
+                audioCapture.resume()
+            }
+            let hudActive = config.hudConfig.isEnabled && config.hudConfig.showNowPlaying
+            nowPlayingMonitor.isPollingEnabled = hudActive
+        }
+
+        updateSpannedGeometryIfNeeded()
         updateMenuBarStatus(with: decisions)
     }
 
     private func apply(decision: PlaybackDecision, to displayID: CGDirectDisplayID) {
         switch decision {
         case .play(let fps):
-            telemetryMonitor.currentFPS = fps
+            let activeType = activeWallpaperType(for: displayID)
+            if case .staticImage = activeType {
+                telemetryMonitor.currentFPS = 0
+            } else {
+                telemetryMonitor.currentFPS = fps
+            }
             videoEngine.setPlaybackState(.playing, for: displayID)
             if let pView = parallaxViews[displayID] {
                 pView.resume()
@@ -735,6 +958,13 @@ public final class AppCoordinator: NSObject,
                 cView.resume()
                 cView.setTargetFrameRate(min(fps, 30))
             }
+            webWallpaperViews[displayID]?.resume()
+            if let ptView = particleViews[displayID] {
+                ptView.resume()
+                ptView.setTargetFrameRate(fps)
+            }
+            hudViews[displayID]?.resume()
+
         case .pause(let reasons):
             telemetryMonitor.currentFPS = 0
             let primaryReason = reasons.sorted(by: { $0.rawValue < $1.rawValue }).first ?? .userRequested
@@ -742,8 +972,17 @@ public final class AppCoordinator: NSObject,
             parallaxViews[displayID]?.pause()
             shaderViews[displayID]?.pause()
             cpuWallpaperViews[displayID]?.pause()
+            webWallpaperViews[displayID]?.pause()
+            particleViews[displayID]?.pause()
+            hudViews[displayID]?.pause()
+
         case .throttle(let fps, _):
-            telemetryMonitor.currentFPS = fps
+            let activeType = activeWallpaperType(for: displayID)
+            if case .staticImage = activeType {
+                telemetryMonitor.currentFPS = 0
+            } else {
+                telemetryMonitor.currentFPS = fps
+            }
             videoEngine.setPlaybackState(.throttled(fps: fps), for: displayID)
             if let pView = parallaxViews[displayID] {
                 pView.resume()
@@ -757,6 +996,12 @@ public final class AppCoordinator: NSObject,
                 cView.resume()
                 cView.setTargetFrameRate(min(fps, 30))
             }
+            webWallpaperViews[displayID]?.resume()
+            if let ptView = particleViews[displayID] {
+                ptView.resume()
+                ptView.setTargetFrameRate(fps)
+            }
+            hudViews[displayID]?.resume()
         }
     }
 
@@ -873,6 +1118,9 @@ public final class AppCoordinator: NSObject,
                 disp.photoPath = nil
                 disp.shaderName = nil
                 disp.shaderPath = nil
+                disp.staticImagePath = nil
+                disp.webPath = nil
+                disp.particleSceneName = nil
                 disp.isEnabled = true
                 cfg.displayConfigurations[key] = disp
             } else {
@@ -880,10 +1128,16 @@ public final class AppCoordinator: NSObject,
                 cfg.photoPath = nil
                 cfg.shaderName = nil
                 cfg.shaderPath = nil
+                cfg.staticImagePath = nil
+                cfg.webPath = nil
+                cfg.particleSceneName = nil
                 for key in cfg.displayConfigurations.keys {
                     cfg.displayConfigurations[key]?.shaderName = nil
                     cfg.displayConfigurations[key]?.shaderPath = nil
                     cfg.displayConfigurations[key]?.photoPath = nil
+                    cfg.displayConfigurations[key]?.staticImagePath = nil
+                    cfg.displayConfigurations[key]?.webPath = nil
+                    cfg.displayConfigurations[key]?.particleSceneName = nil
                     cfg.displayConfigurations[key]?.assetPath = url.path
                 }
             }
@@ -892,7 +1146,7 @@ public final class AppCoordinator: NSObject,
         // 2. Delegate video loading to videoEngine
         try await videoEngine.setVideo(url: url, for: displayID)
 
-        // 3. For all target displays, remove shaders & parallax, and re-attach playerLayer
+        // 3. For all target displays, remove existing renderers and re-attach playerLayer
         let targetIDs: [CGDirectDisplayID]
         if let id = displayID {
             targetIDs = [id]
@@ -901,21 +1155,7 @@ public final class AppCoordinator: NSObject,
         }
 
         for id in targetIDs {
-            if let sView = shaderViews[id] {
-                sView.pause()
-                sView.removeFromSuperview()
-                shaderViews.removeValue(forKey: id)
-            }
-            if let cView = cpuWallpaperViews[id] {
-                cView.pause()
-                cView.removeFromSuperview()
-                cpuWallpaperViews.removeValue(forKey: id)
-            }
-            if let pView = parallaxViews[id] {
-                pView.pause()
-                pView.removeFromSuperview()
-                parallaxViews.removeValue(forKey: id)
-            }
+            cleanDisplayRenderers(displayID: id)
             if let window = attachedWindows[id] ?? windowManager.managedWindows[id],
                let player = videoEngine.player(for: id) {
                 window.attachPlayerLayer(player.playerLayer)
@@ -944,6 +1184,9 @@ public final class AppCoordinator: NSObject,
                 disp.assetPath = nil
                 disp.shaderName = nil
                 disp.shaderPath = nil
+                disp.staticImagePath = nil
+                disp.webPath = nil
+                disp.particleSceneName = nil
                 disp.isEnabled = true
                 cfg.displayConfigurations[key] = disp
             } else {
@@ -951,10 +1194,16 @@ public final class AppCoordinator: NSObject,
                 cfg.defaultAssetPath = nil
                 cfg.shaderName = nil
                 cfg.shaderPath = nil
+                cfg.staticImagePath = nil
+                cfg.webPath = nil
+                cfg.particleSceneName = nil
                 for key in cfg.displayConfigurations.keys {
                     cfg.displayConfigurations[key]?.assetPath = nil
                     cfg.displayConfigurations[key]?.shaderName = nil
                     cfg.displayConfigurations[key]?.shaderPath = nil
+                    cfg.displayConfigurations[key]?.staticImagePath = nil
+                    cfg.displayConfigurations[key]?.webPath = nil
+                    cfg.displayConfigurations[key]?.particleSceneName = nil
                     cfg.displayConfigurations[key]?.photoPath = url.path
                 }
             }
@@ -996,6 +1245,9 @@ public final class AppCoordinator: NSObject,
                 disp.shaderPath = nil
                 disp.photoPath = nil
                 disp.assetPath = nil
+                disp.staticImagePath = nil
+                disp.webPath = nil
+                disp.particleSceneName = nil
                 disp.isEnabled = true
                 cfg.displayConfigurations[key] = disp
             } else {
@@ -1003,10 +1255,16 @@ public final class AppCoordinator: NSObject,
                 cfg.shaderPath = nil
                 cfg.photoPath = nil
                 cfg.defaultAssetPath = nil
+                cfg.staticImagePath = nil
+                cfg.webPath = nil
+                cfg.particleSceneName = nil
                 for key in cfg.displayConfigurations.keys {
                     cfg.displayConfigurations[key]?.assetPath = nil
                     cfg.displayConfigurations[key]?.photoPath = nil
                     cfg.displayConfigurations[key]?.shaderPath = nil
+                    cfg.displayConfigurations[key]?.staticImagePath = nil
+                    cfg.displayConfigurations[key]?.webPath = nil
+                    cfg.displayConfigurations[key]?.particleSceneName = nil
                     cfg.displayConfigurations[key]?.shaderName = preset.rawValue
                 }
             }
@@ -1042,6 +1300,9 @@ public final class AppCoordinator: NSObject,
                 disp.shaderName = nil
                 disp.photoPath = nil
                 disp.assetPath = nil
+                disp.staticImagePath = nil
+                disp.webPath = nil
+                disp.particleSceneName = nil
                 disp.isEnabled = true
                 cfg.displayConfigurations[key] = disp
             } else {
@@ -1049,10 +1310,16 @@ public final class AppCoordinator: NSObject,
                 cfg.shaderName = nil
                 cfg.photoPath = nil
                 cfg.defaultAssetPath = nil
+                cfg.staticImagePath = nil
+                cfg.webPath = nil
+                cfg.particleSceneName = nil
                 for key in cfg.displayConfigurations.keys {
                     cfg.displayConfigurations[key]?.assetPath = nil
                     cfg.displayConfigurations[key]?.photoPath = nil
                     cfg.displayConfigurations[key]?.shaderName = nil
+                    cfg.displayConfigurations[key]?.staticImagePath = nil
+                    cfg.displayConfigurations[key]?.webPath = nil
+                    cfg.displayConfigurations[key]?.particleSceneName = nil
                     cfg.displayConfigurations[key]?.shaderPath = url.path
                 }
             }
@@ -1073,6 +1340,195 @@ public final class AppCoordinator: NSObject,
         reconcileAllScreens()
         refreshMenuBarDisplays()
     }
+
+    public func setStaticImage(url: URL, for displayID: CGDirectDisplayID? = nil, scalingMode: StaticWallpaperView.ScalingMode = .aspectFill) async throws {
+        updateConfig { cfg in
+            if let id = displayID {
+                let key = String(id)
+                var disp = cfg.displayConfigurations[key] ?? DisplayConfig()
+                disp.staticImagePath = url.path
+                disp.webPath = nil
+                disp.particleSceneName = nil
+                disp.photoPath = nil
+                disp.assetPath = nil
+                disp.shaderName = nil
+                disp.shaderPath = nil
+                disp.isEnabled = true
+                cfg.displayConfigurations[key] = disp
+            } else {
+                cfg.staticImagePath = url.path
+                cfg.webPath = nil
+                cfg.particleSceneName = nil
+                cfg.photoPath = nil
+                cfg.defaultAssetPath = nil
+                cfg.shaderName = nil
+                cfg.shaderPath = nil
+                for key in cfg.displayConfigurations.keys {
+                    cfg.displayConfigurations[key]?.assetPath = nil
+                    cfg.displayConfigurations[key]?.photoPath = nil
+                    cfg.displayConfigurations[key]?.shaderName = nil
+                    cfg.displayConfigurations[key]?.shaderPath = nil
+                    cfg.displayConfigurations[key]?.webPath = nil
+                    cfg.displayConfigurations[key]?.particleSceneName = nil
+                    cfg.displayConfigurations[key]?.staticImagePath = url.path
+                }
+            }
+        }
+
+        let targetIDs: [CGDirectDisplayID]
+        if let id = displayID {
+            targetIDs = [id]
+        } else {
+            targetIDs = Array(Set(windowManager.managedWindows.keys).union(activeDisplayIDs))
+        }
+
+        for id in targetIDs {
+            if let window = attachedWindows[id] ?? windowManager.managedWindows[id] {
+                attachStaticImage(to: window, displayID: id, imageURL: url, scalingMode: scalingMode)
+            }
+        }
+        reconcileAllScreens()
+        refreshMenuBarDisplays()
+    }
+
+    public func setWebWallpaper(url: URL, for displayID: CGDirectDisplayID? = nil, allowNetwork: Bool = false) {
+        updateConfig { cfg in
+            if let id = displayID {
+                let key = String(id)
+                var disp = cfg.displayConfigurations[key] ?? DisplayConfig()
+                disp.webPath = url.path
+                disp.staticImagePath = nil
+                disp.particleSceneName = nil
+                disp.photoPath = nil
+                disp.assetPath = nil
+                disp.shaderName = nil
+                disp.shaderPath = nil
+                disp.isEnabled = true
+                cfg.displayConfigurations[key] = disp
+            } else {
+                cfg.webPath = url.path
+                cfg.staticImagePath = nil
+                cfg.particleSceneName = nil
+                cfg.photoPath = nil
+                cfg.defaultAssetPath = nil
+                cfg.shaderName = nil
+                cfg.shaderPath = nil
+                for key in cfg.displayConfigurations.keys {
+                    cfg.displayConfigurations[key]?.assetPath = nil
+                    cfg.displayConfigurations[key]?.photoPath = nil
+                    cfg.displayConfigurations[key]?.shaderName = nil
+                    cfg.displayConfigurations[key]?.shaderPath = nil
+                    cfg.displayConfigurations[key]?.staticImagePath = nil
+                    cfg.displayConfigurations[key]?.particleSceneName = nil
+                    cfg.displayConfigurations[key]?.webPath = url.path
+                }
+            }
+        }
+
+        let targetIDs: [CGDirectDisplayID]
+        if let id = displayID {
+            targetIDs = [id]
+        } else {
+            targetIDs = Array(Set(windowManager.managedWindows.keys).union(activeDisplayIDs))
+        }
+
+        for id in targetIDs {
+            if let window = attachedWindows[id] ?? windowManager.managedWindows[id] {
+                attachWeb(to: window, displayID: id, htmlURL: url, allowNetwork: allowNetwork)
+            }
+        }
+        reconcileAllScreens()
+        refreshMenuBarDisplays()
+    }
+
+    public func setParticles(scene: ParticleSceneType, for displayID: CGDirectDisplayID? = nil) {
+        updateConfig { cfg in
+            if let id = displayID {
+                let key = String(id)
+                var disp = cfg.displayConfigurations[key] ?? DisplayConfig()
+                disp.particleSceneName = scene.rawValue
+                disp.staticImagePath = nil
+                disp.webPath = nil
+                disp.photoPath = nil
+                disp.assetPath = nil
+                disp.shaderName = nil
+                disp.shaderPath = nil
+                disp.isEnabled = true
+                cfg.displayConfigurations[key] = disp
+            } else {
+                cfg.particleSceneName = scene.rawValue
+                cfg.staticImagePath = nil
+                cfg.webPath = nil
+                cfg.photoPath = nil
+                cfg.defaultAssetPath = nil
+                cfg.shaderName = nil
+                cfg.shaderPath = nil
+                for key in cfg.displayConfigurations.keys {
+                    cfg.displayConfigurations[key]?.assetPath = nil
+                    cfg.displayConfigurations[key]?.photoPath = nil
+                    cfg.displayConfigurations[key]?.shaderName = nil
+                    cfg.displayConfigurations[key]?.shaderPath = nil
+                    cfg.displayConfigurations[key]?.staticImagePath = nil
+                    cfg.displayConfigurations[key]?.webPath = nil
+                    cfg.displayConfigurations[key]?.particleSceneName = scene.rawValue
+                }
+            }
+        }
+
+        let targetIDs: [CGDirectDisplayID]
+        if let id = displayID {
+            targetIDs = [id]
+        } else {
+            targetIDs = Array(Set(windowManager.managedWindows.keys).union(activeDisplayIDs))
+        }
+
+        for id in targetIDs {
+            if let window = attachedWindows[id] ?? windowManager.managedWindows[id] {
+                attachParticles(to: window, displayID: id, sceneType: scene)
+            }
+        }
+        reconcileAllScreens()
+        refreshMenuBarDisplays()
+    }
+
+    public func updateSpannedGeometryIfNeeded() {
+        guard config.isSpanned else { return }
+        let screenFrames = windowManager.screenManager.activeScreens.reduce(into: [CGDirectDisplayID: CGRect]()) { dict, screen in
+            dict[screen.displayID] = screen.frame
+        }
+        for (id, sView) in staticWallpaperViews {
+            sView.scalingMode = .stretch
+            sView.contentsRect = displaySpanManager.normalizedContentsRect(for: id, allScreens: screenFrames)
+        }
+    }
+
+    public func setSpanned(_ spanned: Bool) {
+        updateConfig { cfg in
+            cfg.isSpanned = spanned
+        }
+        let screenFrames = windowManager.screenManager.activeScreens.reduce(into: [CGDirectDisplayID: CGRect]()) { dict, screen in
+            dict[screen.displayID] = screen.frame
+        }
+        for (id, sView) in staticWallpaperViews {
+            if spanned {
+                sView.scalingMode = .stretch
+                sView.contentsRect = displaySpanManager.normalizedContentsRect(for: id, allScreens: screenFrames)
+            } else {
+                sView.scalingMode = .aspectFill
+                sView.contentsRect = CGRect(x: 0, y: 0, width: 1, height: 1)
+            }
+        }
+    }
+
+    public func applyProfile(_ profile: EngineProfile) {
+        updateConfig { cfg in
+            self.profileManager.applyProfile(profile, to: &cfg)
+        }
+        performanceRulesManager.pauseOnFullscreen = profile.pauseOnFullscreen
+        performanceRulesManager.pauseOnGame = profile.pauseOnGame
+        reconcileAllScreens()
+    }
+
 
     // MARK: - Configuration Mutations & Debounced Persistence
 
@@ -1185,21 +1641,7 @@ public final class AppCoordinator: NSObject,
     }
 
     public func desktopWindowManager(_ manager: DesktopWindowManagerProtocol, didRemoveWindowFor displayID: CGDirectDisplayID) {
-        if let sView = shaderViews[displayID] {
-            sView.pause()
-            sView.removeFromSuperview()
-            shaderViews.removeValue(forKey: displayID)
-        }
-        if let cView = cpuWallpaperViews[displayID] {
-            cView.pause()
-            cView.removeFromSuperview()
-            cpuWallpaperViews.removeValue(forKey: displayID)
-        }
-        if let pView = parallaxViews[displayID] {
-            pView.pause()
-            pView.removeFromSuperview()
-            parallaxViews.removeValue(forKey: displayID)
-        }
+        cleanDisplayRenderers(displayID: displayID)
         if let hView = hudViews[displayID] {
             hView.removeFromSuperview()
             hudViews.removeValue(forKey: displayID)
@@ -1223,10 +1665,14 @@ public final class AppCoordinator: NSObject,
     }
 
     public func desktopWindowManager(_ manager: DesktopWindowManagerProtocol, didReconcileWindows added: [CGDirectDisplayID], removed: [CGDirectDisplayID], updated: [CGDirectDisplayID]) {
+        updateSpannedGeometryIfNeeded()
+        reconcileAllScreens()
         refreshMenuBarDisplays()
     }
 
     public func displayConfigurationDidChange(added: [CGDirectDisplayID], removed: [CGDirectDisplayID], updated: [CGDirectDisplayID]) {
+        updateSpannedGeometryIfNeeded()
+        reconcileAllScreens()
         refreshMenuBarDisplays()
     }
 
@@ -1240,15 +1686,21 @@ public final class AppCoordinator: NSObject,
         let ext = url.pathExtension.lowercased()
         let imageExtensions = ["jpg", "jpeg", "png", "heic", "heif", "tiff", "webp"]
         let shaderExtensions = ["metal", "shadertoy", "frag", "glsl", "txt"]
+        let webExtensions = ["html", "htm"]
 
         if shaderExtensions.contains(ext) {
             setShader(url: url, for: displayID)
             return
         }
 
+        if webExtensions.contains(ext) {
+            setWebWallpaper(url: url, for: displayID)
+            return
+        }
+
         Task { @MainActor [weak self] in
             if imageExtensions.contains(ext) {
-                try? await self?.setPhoto(url: url, for: displayID)
+                try? await self?.setStaticImage(url: url, for: displayID)
             } else {
                 try? await self?.setVideo(url: url, for: displayID)
             }
@@ -1314,4 +1766,42 @@ public final class AppCoordinator: NSObject,
         stop()
         NSApp.terminate(nil)
     }
+
+    // MARK: - MemoryPressureDelegate
+
+    public func memoryPressureDidChange(to level: MemoryPressureLevel) {
+        if level == .warning {
+            StaticWallpaperCache.shared.trim(toRatio: 0.5)
+            WallpaperThumbnailCache.shared.clearMemoryCache()
+        } else if level == .critical {
+            StaticWallpaperCache.shared.clear()
+            WallpaperThumbnailCache.shared.clearMemoryCache()
+        }
+        reconcileAllScreens()
+    }
+
+    // MARK: - PerformanceRulesDelegate
+
+    public func performanceRulesDidChange(fullscreenOnDisplays: Set<CGDirectDisplayID>, isGameActive: Bool, isIdle: Bool) {
+        reconcileAllScreens()
+    }
+
+    // MARK: - WallpaperPlaylistDelegate
+
+    public func playlistManager(_ manager: WallpaperPlaylistManager, didRequestSwitchTo item: PlaylistItem, for displayID: CGDirectDisplayID?) {
+        let ext = item.url.pathExtension.lowercased()
+        let imageExtensions = ["jpg", "jpeg", "png", "heic", "heif", "tiff", "webp"]
+        let webExtensions = ["html", "htm"]
+        Task { @MainActor [weak self] in
+            guard let self = self else { return }
+            if imageExtensions.contains(ext) {
+                try? await self.setStaticImage(url: item.url, for: displayID, scalingMode: .aspectFill)
+            } else if webExtensions.contains(ext) {
+                self.setWebWallpaper(url: item.url, for: displayID, allowNetwork: false)
+            } else {
+                try? await self.setVideo(url: item.url, for: displayID)
+            }
+        }
+    }
 }
+

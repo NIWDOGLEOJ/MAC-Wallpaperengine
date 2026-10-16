@@ -20,12 +20,17 @@ public enum PauseReason: String, Codable, Hashable, Sendable {
     case onBattery = "Running on Battery Power"
     case displayOccluded = "Display Fully Occluded"
     case thermalPressure = "Thermal Pressure Protection"
+    case fullscreenApp = "Fullscreen App Active"
+    case gameActive = "Game Active"
+    case desktopIdle = "Desktop Idle"
+    case memoryPressure = "Memory Pressure Protection"
 }
 
 /// Enumeration of reasons why video playback frame rate may be throttled.
 public enum ThrottleReason: String, Codable, Hashable, Sendable {
     case onBattery = "Battery Power Throttling"
     case thermalPressure = "Elevated Thermal State"
+    case desktopIdle = "Desktop Idle Throttling"
 }
 
 /// Dynamic playback state of an individual video player pipeline.

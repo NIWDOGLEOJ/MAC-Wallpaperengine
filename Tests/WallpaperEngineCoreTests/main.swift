@@ -51,6 +51,22 @@ await ThemeEngineTests.runAllTests()
 // --- Native macOS Application UI & Studio Suites ---
 await AppUITests.runAllTests()
 
+// --- Static Wallpaper & Zero-Work CALayer Scanout Suites ---
+await StaticWallpaperTests.runAllTests()
+
+// --- Performance Rules & Advanced State Evaluator Suites ---
+await PerformanceRulesTests.runAllTests()
+
+// --- Wallpaper Library & Playlist Engine Suites ---
+await LibraryAndPlaylistTests.runAllTests()
+
+// --- Web Wallpaper & Interactive Particle Engine Suites ---
+await WebAndParticleTests.runAllTests()
+
+// --- Performance Profiles, Editor & Community Packaging Suites ---
+await ProfileAndPackageTests.runAllTests()
+
 // Conclude and return POSIX exit code (0 on success, 1 on failure)
 let exitCode = TestRunner.shared.printSummary()
 exit(exitCode)
+

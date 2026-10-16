@@ -67,6 +67,9 @@ public enum ActiveWallpaperType: Equatable, Sendable {
     case customShader(path: String)
     case parallax(path: String)
     case video(path: String)
+    case staticImage(path: String)
+    case web(path: String)
+    case particles(ParticleSceneType)
     case none
 }
 
@@ -164,6 +167,15 @@ public final class AppState: ObservableObject {
         if let id = targetID {
             let key = String(id)
             if let disp = config.displayConfigurations[key] {
+                if let iPath = disp.staticImagePath {
+                    return .staticImage(path: iPath)
+                }
+                if let wPath = disp.webPath {
+                    return .web(path: wPath)
+                }
+                if let pScene = disp.particleSceneName, let scene = ParticleSceneType(rawValue: pScene) {
+                    return .particles(scene)
+                }
                 if let sName = disp.shaderName, let preset = ProceduralShaderPreset(rawValue: sName) {
                     return .shader(preset)
                 }
@@ -180,6 +192,15 @@ public final class AppState: ObservableObject {
         }
 
         // Global fallback
+        if let iPath = config.staticImagePath {
+            return .staticImage(path: iPath)
+        }
+        if let wPath = config.webPath {
+            return .web(path: wPath)
+        }
+        if let pScene = config.particleSceneName, let scene = ParticleSceneType(rawValue: pScene) {
+            return .particles(scene)
+        }
         if let sName = config.shaderName, let preset = ProceduralShaderPreset(rawValue: sName) {
             return .shader(preset)
         }

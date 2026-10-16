@@ -51,6 +51,18 @@ public struct EngineConfig: Codable, Equatable, Sendable {
     // Ultra-Lightweight CPU-Only Mode (0% GPU)
     public var useCPUOnlyEngine: Bool
 
+    // Static Wallpaper Image (0% CPU / 0% GPU)
+    public var staticImagePath: String?
+
+    // Web-Based HTML Wallpaper
+    public var webPath: String?
+
+    // Interactive Particle Wallpaper Scene (Rain, Snow, Fireflies)
+    public var particleSceneName: String?
+
+    // Multi-Monitor Spanning Mode
+    public var isSpanned: Bool
+
     public var shaderPreset: ProceduralShaderPreset? {
         get {
             guard let shaderName = shaderName else { return nil }
@@ -94,6 +106,10 @@ public struct EngineConfig: Codable, Equatable, Sendable {
         shaderPath: String? = nil,
         shaderSpeed: Float = 1.0,
         useCPUOnlyEngine: Bool = true,
+        staticImagePath: String? = nil,
+        webPath: String? = nil,
+        particleSceneName: String? = nil,
+        isSpanned: Bool = false,
         hudConfig: HUDConfig = .init(),
         isAudioReactive: Bool = true,
         displayConfigurations: [String: DisplayConfig] = [:]
@@ -120,6 +136,10 @@ public struct EngineConfig: Codable, Equatable, Sendable {
         self.shaderPath = shaderPath
         self.shaderSpeed = max(0.01, shaderSpeed)
         self.useCPUOnlyEngine = useCPUOnlyEngine
+        self.staticImagePath = staticImagePath
+        self.webPath = webPath
+        self.particleSceneName = particleSceneName
+        self.isSpanned = isSpanned
         self.hudConfig = hudConfig
         self.isAudioReactive = isAudioReactive
         self.displayConfigurations = displayConfigurations
@@ -153,6 +173,10 @@ public struct EngineConfig: Codable, Equatable, Sendable {
         self.shaderPath = try container.decodeIfPresent(String.self, forKey: .shaderPath)
         self.shaderSpeed = try container.decodeIfPresent(Float.self, forKey: .shaderSpeed) ?? 1.0
         self.useCPUOnlyEngine = try container.decodeIfPresent(Bool.self, forKey: .useCPUOnlyEngine) ?? true
+        self.staticImagePath = try container.decodeIfPresent(String.self, forKey: .staticImagePath)
+        self.webPath = try container.decodeIfPresent(String.self, forKey: .webPath)
+        self.particleSceneName = try container.decodeIfPresent(String.self, forKey: .particleSceneName)
+        self.isSpanned = try container.decodeIfPresent(Bool.self, forKey: .isSpanned) ?? false
 
         self.hudConfig = try container.decodeIfPresent(HUDConfig.self, forKey: .hudConfig) ?? HUDConfig()
         self.isAudioReactive = try container.decodeIfPresent(Bool.self, forKey: .isAudioReactive) ?? true
@@ -231,6 +255,9 @@ public struct EngineConfig: Codable, Equatable, Sendable {
         public var photoPath: String?
         public var shaderName: String?
         public var shaderPath: String?
+        public var staticImagePath: String?
+        public var webPath: String?
+        public var particleSceneName: String?
         public var scalingMode: ScalingMode
         public var isEnabled: Bool
         public var isMuted: Bool
@@ -246,6 +273,9 @@ public struct EngineConfig: Codable, Equatable, Sendable {
             photoPath: String? = nil,
             shaderName: String? = nil,
             shaderPath: String? = nil,
+            staticImagePath: String? = nil,
+            webPath: String? = nil,
+            particleSceneName: String? = nil,
             scalingMode: ScalingMode = .aspectFill,
             isEnabled: Bool = true,
             isMuted: Bool = true
@@ -254,6 +284,9 @@ public struct EngineConfig: Codable, Equatable, Sendable {
             self.photoPath = photoPath
             self.shaderName = shaderName
             self.shaderPath = shaderPath
+            self.staticImagePath = staticImagePath
+            self.webPath = webPath
+            self.particleSceneName = particleSceneName
             self.scalingMode = scalingMode
             self.isEnabled = isEnabled
             self.isMuted = isMuted
@@ -265,6 +298,9 @@ public struct EngineConfig: Codable, Equatable, Sendable {
             self.photoPath = try container.decodeIfPresent(String.self, forKey: .photoPath)
             self.shaderName = try container.decodeIfPresent(String.self, forKey: .shaderName)
             self.shaderPath = try container.decodeIfPresent(String.self, forKey: .shaderPath)
+            self.staticImagePath = try container.decodeIfPresent(String.self, forKey: .staticImagePath)
+            self.webPath = try container.decodeIfPresent(String.self, forKey: .webPath)
+            self.particleSceneName = try container.decodeIfPresent(String.self, forKey: .particleSceneName)
             self.scalingMode = try container.decodeIfPresent(ScalingMode.self, forKey: .scalingMode) ?? .aspectFill
             self.isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
             self.isMuted = try container.decodeIfPresent(Bool.self, forKey: .isMuted) ?? true

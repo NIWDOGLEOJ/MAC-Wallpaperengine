@@ -194,9 +194,42 @@ public final class DesktopHUDView: NSView {
         updateClockDisplay()
     }
 
+    // Static reusable date formatters to eliminate allocations on timer ticks
+    private static let sharedTimeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "h:mm:ss a"
+        return formatter
+    }()
+
+    private static let sharedDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEEE, MMMM d, yyyy"
+        return formatter
+    }()
+
+    public private(set) var isPaused: Bool = false
+
+    public func pause() {
+        guard !isPaused else { return }
+        isPaused = true
+        clockTimer?.invalidate()
+        clockTimer = nil
+    }
+
+    public func resume() {
+        guard isPaused else { return }
+        isPaused = false
+        startClockTimer()
+        updateClockDisplay()
+    }
+
     private func startClockTimer() {
         clockTimer?.invalidate()
-        clockTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+        guard !isPaused && (config.showClock || config.showDate) else {
+            clockTimer = nil
+            return
+        }
+        clockTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.updateClockDisplay()
             }
@@ -204,14 +237,10 @@ public final class DesktopHUDView: NSView {
     }
 
     private func updateClockDisplay() {
+        guard !isPaused && (config.showClock || config.showDate) else { return }
         let now = Date()
-        let timeFormatter = DateFormatter()
-        timeFormatter.dateFormat = "h:mm:ss a"
-        timeLabel.stringValue = timeFormatter.string(from: now)
-
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "EEEE, MMMM d, yyyy"
-        dateLabel.stringValue = dateFormatter.string(from: now)
+        timeLabel.stringValue = Self.sharedTimeFormatter.string(from: now)
+        dateLabel.stringValue = Self.sharedDateFormatter.string(from: now)
     }
 
     // MARK: - 2. System Stats Widget
@@ -493,6 +522,7 @@ public final class DesktopHUDView: NSView {
         nowPlayingContainer.isHidden = !hudConfig.showNowPlaying
         spectrumContainer.isHidden = !hudConfig.showAudioVisualizer
         self.isHidden = !hudConfig.isEnabled
+        startClockTimer()
     }
 
     public func updatePlacement(in screenFrame: CGRect) {

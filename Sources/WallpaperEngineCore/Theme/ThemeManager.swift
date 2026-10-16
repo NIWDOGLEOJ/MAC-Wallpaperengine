@@ -169,6 +169,60 @@ public final class ThemeManager: WallpaperMonitorDelegate {
                 palette = .fallback
             }
 
+        case .applicationStaticImage(let path):
+            let url = URL(fileURLWithPath: path)
+            if let pal = await extractor.extractPalette(fromImageAt: url) {
+                palette = pal
+            } else {
+                palette = .fallback
+            }
+
+        case .applicationWeb:
+            palette = ExtractedPalette(
+                dominant: CodableRGBA(red: 0.15, green: 0.20, blue: 0.30),
+                vibrant: CodableRGBA(red: 0.20, green: 0.60, blue: 1.00),
+                secondary: CodableRGBA(red: 0.10, green: 0.80, blue: 0.90),
+                darkMuted: CodableRGBA(red: 0.05, green: 0.07, blue: 0.10),
+                lightMuted: CodableRGBA(red: 0.92, green: 0.96, blue: 0.98),
+                averageLuminance: 0.25,
+                isPredominantlyDark: true
+            )
+
+        case .applicationParticles(let scene):
+            switch scene {
+            case .rain:
+                palette = ExtractedPalette(
+                    dominant: CodableRGBA(red: 0.10, green: 0.15, blue: 0.25),
+                    vibrant: CodableRGBA(red: 0.40, green: 0.70, blue: 0.95),
+                    secondary: CodableRGBA(red: 0.20, green: 0.40, blue: 0.60),
+                    darkMuted: CodableRGBA(red: 0.05, green: 0.08, blue: 0.12),
+                    lightMuted: CodableRGBA(red: 0.80, green: 0.90, blue: 0.98),
+                    averageLuminance: 0.20,
+                    isPredominantlyDark: true
+                )
+            case .snow:
+                palette = ExtractedPalette(
+                    dominant: CodableRGBA(red: 0.20, green: 0.25, blue: 0.35),
+                    vibrant: CodableRGBA(red: 0.85, green: 0.92, blue: 1.00),
+                    secondary: CodableRGBA(red: 0.50, green: 0.65, blue: 0.80),
+                    darkMuted: CodableRGBA(red: 0.10, green: 0.12, blue: 0.18),
+                    lightMuted: CodableRGBA(red: 0.95, green: 0.98, blue: 1.00),
+                    averageLuminance: 0.35,
+                    isPredominantlyDark: false
+                )
+            case .ambientFireflies:
+                palette = ExtractedPalette(
+                    dominant: CodableRGBA(red: 0.05, green: 0.12, blue: 0.08),
+                    vibrant: CodableRGBA(red: 0.80, green: 1.00, blue: 0.20),
+                    secondary: CodableRGBA(red: 0.40, green: 0.80, blue: 0.30),
+                    darkMuted: CodableRGBA(red: 0.02, green: 0.06, blue: 0.03),
+                    lightMuted: CodableRGBA(red: 0.90, green: 0.98, blue: 0.85),
+                    averageLuminance: 0.15,
+                    isPredominantlyDark: true
+                )
+            }
+
+
         case .systemDesktopImage(let url):
             if let pal = await extractor.extractPalette(fromImageAt: url) {
                 palette = pal
