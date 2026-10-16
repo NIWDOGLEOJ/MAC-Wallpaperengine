@@ -448,9 +448,15 @@ public struct CommandLineOptions: Equatable, Sendable {
                 let key = String(targetDisplay)
                 var displayCfg = config.displayConfigurations[key] ?? DisplayConfig()
                 displayCfg.assetPath = video
+                displayCfg.shaderName = nil
+                displayCfg.shaderPath = nil
+                displayCfg.photoPath = nil
                 config.displayConfigurations[key] = displayCfg
             } else {
                 config.defaultAssetPath = video
+                config.shaderName = nil
+                config.shaderPath = nil
+                config.photoPath = nil
             }
         }
         if let photo = photoPath {
@@ -458,9 +464,15 @@ public struct CommandLineOptions: Equatable, Sendable {
                 let key = String(targetDisplay)
                 var displayCfg = config.displayConfigurations[key] ?? DisplayConfig()
                 displayCfg.photoPath = photo
+                displayCfg.assetPath = nil
+                displayCfg.shaderName = nil
+                displayCfg.shaderPath = nil
                 config.displayConfigurations[key] = displayCfg
             } else {
                 config.photoPath = photo
+                config.defaultAssetPath = nil
+                config.shaderName = nil
+                config.shaderPath = nil
             }
         }
         if let shader = shaderName {
@@ -468,9 +480,15 @@ public struct CommandLineOptions: Equatable, Sendable {
                 let key = String(targetDisplay)
                 var displayCfg = config.displayConfigurations[key] ?? DisplayConfig()
                 displayCfg.shaderName = shader
+                displayCfg.shaderPath = nil
+                displayCfg.photoPath = nil
+                displayCfg.assetPath = nil
                 config.displayConfigurations[key] = displayCfg
             } else {
                 config.shaderName = shader
+                config.shaderPath = nil
+                config.photoPath = nil
+                config.defaultAssetPath = nil
             }
         }
         if let path = shaderPath {
@@ -478,9 +496,15 @@ public struct CommandLineOptions: Equatable, Sendable {
                 let key = String(targetDisplay)
                 var displayCfg = config.displayConfigurations[key] ?? DisplayConfig()
                 displayCfg.shaderPath = path
+                displayCfg.shaderName = nil
+                displayCfg.photoPath = nil
+                displayCfg.assetPath = nil
                 config.displayConfigurations[key] = displayCfg
             } else {
                 config.shaderPath = path
+                config.shaderName = nil
+                config.photoPath = nil
+                config.defaultAssetPath = nil
             }
         }
         if let speed = shaderSpeed {

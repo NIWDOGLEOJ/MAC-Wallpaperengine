@@ -293,45 +293,68 @@ public final class AppCoordinator: NSObject,
         occlusionManager.registerDisplay(displayID, isVisible: true)
         videoEngine.registerDisplay(displayID)
 
-        // 1. Resolve procedural or imported shader
         let dispConfig = config.displayConfigurations[String(displayID)]
-        let shaderName = dispConfig?.shaderName ?? config.shaderName
-        let shaderPath = dispConfig?.shaderPath ?? config.shaderPath
 
-        if let sName = shaderName, let preset = ProceduralShaderPreset(rawValue: sName) {
+        // 1. Resolve display-specific configuration first
+        if let dCfg = dispConfig {
+            if let sName = dCfg.shaderName, let preset = ProceduralShaderPreset(rawValue: sName) {
+                attachShader(to: window, displayID: displayID, preset: preset)
+                attachOrUpdateHUD(for: displayID, in: window)
+                return
+            } else if let sPath = dCfg.shaderPath, FileManager.default.fileExists(atPath: sPath) {
+                let sURL = URL(fileURLWithPath: sPath)
+                attachShader(to: window, displayID: displayID, fileURL: sURL)
+                attachOrUpdateHUD(for: displayID, in: window)
+                return
+            } else if let pPath = dCfg.photoPath, FileManager.default.fileExists(atPath: pPath) {
+                let pURL = URL(fileURLWithPath: pPath)
+                attachParallax(to: window, displayID: displayID, photoURL: pURL)
+                attachOrUpdateHUD(for: displayID, in: window)
+                return
+            } else if let vPath = dCfg.assetPath, FileManager.default.fileExists(atPath: vPath) {
+                if let player = videoEngine.player(for: displayID) {
+                    window.attachPlayerLayer(player.playerLayer)
+                }
+                let url = URL(fileURLWithPath: vPath)
+                Task { @MainActor [weak self] in
+                    try? await self?.videoEngine.setVideo(url: url, for: displayID)
+                }
+                attachOrUpdateHUD(for: displayID, in: window)
+                return
+            }
+        }
+
+        // 2. Fall back to global configuration
+        if let sName = config.shaderName, let preset = ProceduralShaderPreset(rawValue: sName) {
             attachShader(to: window, displayID: displayID, preset: preset)
             attachOrUpdateHUD(for: displayID, in: window)
             return
-        } else if let sPath = shaderPath, FileManager.default.fileExists(atPath: sPath) {
+        } else if let sPath = config.shaderPath, FileManager.default.fileExists(atPath: sPath) {
             let sURL = URL(fileURLWithPath: sPath)
             attachShader(to: window, displayID: displayID, fileURL: sURL)
             attachOrUpdateHUD(for: displayID, in: window)
             return
-        }
-
-        // 2. Resolve assigned photo path for 3D parallax scene
-        let photoPath = dispConfig?.photoPath ?? config.photoPath
-        if let pPath = photoPath, FileManager.default.fileExists(atPath: pPath) {
+        } else if let pPath = config.photoPath, FileManager.default.fileExists(atPath: pPath) {
             let pURL = URL(fileURLWithPath: pPath)
             attachParallax(to: window, displayID: displayID, photoURL: pURL)
             attachOrUpdateHUD(for: displayID, in: window)
             return
-        }
-
-        if let player = videoEngine.player(for: displayID) {
-            window.attachPlayerLayer(player.playerLayer)
-        }
-
-        // 3. Resolve assigned video path
-        let assetPath = dispConfig?.assetPath ?? config.defaultAssetPath
-        if let path = assetPath, FileManager.default.fileExists(atPath: path) {
-            let url = URL(fileURLWithPath: path)
+        } else if let vPath = config.defaultAssetPath, FileManager.default.fileExists(atPath: vPath) {
+            if let player = videoEngine.player(for: displayID) {
+                window.attachPlayerLayer(player.playerLayer)
+            }
+            let url = URL(fileURLWithPath: vPath)
             Task { @MainActor [weak self] in
                 try? await self?.videoEngine.setVideo(url: url, for: displayID)
             }
+            attachOrUpdateHUD(for: displayID, in: window)
+            return
         }
 
-        // 4. Attach or update Desktop HUD overlay
+        // 3. Fallback: attach player layer
+        if let player = videoEngine.player(for: displayID) {
+            window.attachPlayerLayer(player.playerLayer)
+        }
         attachOrUpdateHUD(for: displayID, in: window)
     }
 
@@ -360,26 +383,37 @@ public final class AppCoordinator: NSObject,
 
     private func attachShader(to window: DesktopWindowProtocol, displayID: CGDirectDisplayID, preset: ProceduralShaderPreset) {
         window.removePlayerLayer()
+        videoEngine.setPlaybackState(.paused(reason: .userRequested), for: displayID)
+
         parallaxViews[displayID]?.pause()
         parallaxViews[displayID]?.removeFromSuperview()
         parallaxViews.removeValue(forKey: displayID)
 
-        shaderViews[displayID]?.pause()
-        shaderViews[displayID]?.removeFromSuperview()
+        if let existing = shaderViews[displayID] {
+            do {
+                try existing.loadPreset(preset)
+                existing.setSpeed(config.shaderSpeed)
+                existing.setTargetFrameRate(config.targetFrameRate)
+                existing.resume()
+                logger.info("Updated procedural shader to '\(preset.displayName)' on display \(displayID)")
+            } catch {
+                logger.error("Failed to update preset '\(preset.displayName)': \(error.localizedDescription)")
+            }
+        } else {
+            let frame = window.underlyingWindow.contentView?.bounds ?? window.frame
+            let shaderView = ShaderWallpaperView(frame: frame)
+            shaderView.autoresizingMask = [.width, .height]
+            shaderView.setSpeed(config.shaderSpeed)
+            shaderView.setTargetFrameRate(config.targetFrameRate)
 
-        let frame = window.underlyingWindow.contentView?.bounds ?? window.frame
-        let shaderView = ShaderWallpaperView(frame: frame)
-        shaderView.autoresizingMask = [.width, .height]
-        shaderView.setSpeed(config.shaderSpeed)
-        shaderView.setTargetFrameRate(config.targetFrameRate)
-
-        do {
-            try shaderView.loadPreset(preset)
-            window.underlyingWindow.contentView?.addSubview(shaderView)
-            shaderViews[displayID] = shaderView
-            logger.info("Procedural shader '\(preset.displayName)' attached to display \(displayID)")
-        } catch {
-            logger.error("Failed to load procedural preset '\(preset.displayName)': \(error.localizedDescription)")
+            do {
+                try shaderView.loadPreset(preset)
+                window.underlyingWindow.contentView?.addSubview(shaderView)
+                shaderViews[displayID] = shaderView
+                logger.info("Procedural shader '\(preset.displayName)' attached to display \(displayID)")
+            } catch {
+                logger.error("Failed to load procedural preset '\(preset.displayName)': \(error.localizedDescription)")
+            }
         }
 
         if let hView = hudViews[displayID] {
@@ -389,26 +423,37 @@ public final class AppCoordinator: NSObject,
 
     private func attachShader(to window: DesktopWindowProtocol, displayID: CGDirectDisplayID, fileURL: URL) {
         window.removePlayerLayer()
+        videoEngine.setPlaybackState(.paused(reason: .userRequested), for: displayID)
+
         parallaxViews[displayID]?.pause()
         parallaxViews[displayID]?.removeFromSuperview()
         parallaxViews.removeValue(forKey: displayID)
 
-        shaderViews[displayID]?.pause()
-        shaderViews[displayID]?.removeFromSuperview()
+        if let existing = shaderViews[displayID] {
+            do {
+                try existing.loadShader(from: fileURL)
+                existing.setSpeed(config.shaderSpeed)
+                existing.setTargetFrameRate(config.targetFrameRate)
+                existing.resume()
+                logger.info("Updated custom shader from '\(fileURL.lastPathComponent)' on display \(displayID)")
+            } catch {
+                logger.error("Failed to reload custom shader from \(fileURL.path): \(error.localizedDescription)")
+            }
+        } else {
+            let frame = window.underlyingWindow.contentView?.bounds ?? window.frame
+            let shaderView = ShaderWallpaperView(frame: frame)
+            shaderView.autoresizingMask = [.width, .height]
+            shaderView.setSpeed(config.shaderSpeed)
+            shaderView.setTargetFrameRate(config.targetFrameRate)
 
-        let frame = window.underlyingWindow.contentView?.bounds ?? window.frame
-        let shaderView = ShaderWallpaperView(frame: frame)
-        shaderView.autoresizingMask = [.width, .height]
-        shaderView.setSpeed(config.shaderSpeed)
-        shaderView.setTargetFrameRate(config.targetFrameRate)
-
-        do {
-            try shaderView.loadShader(from: fileURL)
-            window.underlyingWindow.contentView?.addSubview(shaderView)
-            shaderViews[displayID] = shaderView
-            logger.info("Custom shader '\(fileURL.lastPathComponent)' attached to display \(displayID)")
-        } catch {
-            logger.error("Failed to load custom shader from \(fileURL.path): \(error.localizedDescription)")
+            do {
+                try shaderView.loadShader(from: fileURL)
+                window.underlyingWindow.contentView?.addSubview(shaderView)
+                shaderViews[displayID] = shaderView
+                logger.info("Custom shader '\(fileURL.lastPathComponent)' attached to display \(displayID)")
+            } catch {
+                logger.error("Failed to load custom shader from \(fileURL.path): \(error.localizedDescription)")
+            }
         }
 
         if let hView = hudViews[displayID] {
@@ -418,10 +463,13 @@ public final class AppCoordinator: NSObject,
 
     private func attachParallax(to window: DesktopWindowProtocol, displayID: CGDirectDisplayID, photoURL: URL) {
         window.removePlayerLayer()
+        videoEngine.setPlaybackState(.paused(reason: .userRequested), for: displayID)
+
         shaderViews[displayID]?.pause()
         shaderViews[displayID]?.removeFromSuperview()
         shaderViews.removeValue(forKey: displayID)
 
+        parallaxViews[displayID]?.pause()
         parallaxViews[displayID]?.removeFromSuperview()
 
         let frame = window.underlyingWindow.contentView?.bounds ?? window.frame
@@ -619,21 +667,63 @@ public final class AppCoordinator: NSObject,
     }
 
     public func setVideo(url: URL, for displayID: CGDirectDisplayID?) async throws {
-        try await videoEngine.setVideo(url: url, for: displayID)
-
+        // 1. Update config cleanly enforcing mutual exclusivity
         updateConfig { cfg in
             if let id = displayID {
                 let key = String(id)
                 var disp = cfg.displayConfigurations[key] ?? DisplayConfig()
                 disp.assetPath = url.path
                 disp.photoPath = nil
+                disp.shaderName = nil
+                disp.shaderPath = nil
                 disp.isEnabled = true
                 cfg.displayConfigurations[key] = disp
             } else {
                 cfg.defaultAssetPath = url.path
                 cfg.photoPath = nil
+                cfg.shaderName = nil
+                cfg.shaderPath = nil
+                for key in cfg.displayConfigurations.keys {
+                    cfg.displayConfigurations[key]?.shaderName = nil
+                    cfg.displayConfigurations[key]?.shaderPath = nil
+                    cfg.displayConfigurations[key]?.photoPath = nil
+                    cfg.displayConfigurations[key]?.assetPath = url.path
+                }
             }
         }
+
+        // 2. Delegate video loading to videoEngine
+        try await videoEngine.setVideo(url: url, for: displayID)
+
+        // 3. For all target displays, remove shaders & parallax, and re-attach playerLayer
+        let targetIDs: [CGDirectDisplayID]
+        if let id = displayID {
+            targetIDs = [id]
+        } else {
+            targetIDs = Array(Set(windowManager.managedWindows.keys).union(activeDisplayIDs))
+        }
+
+        for id in targetIDs {
+            if let sView = shaderViews[id] {
+                sView.pause()
+                sView.removeFromSuperview()
+                shaderViews.removeValue(forKey: id)
+            }
+            if let pView = parallaxViews[id] {
+                pView.pause()
+                pView.removeFromSuperview()
+                parallaxViews.removeValue(forKey: id)
+            }
+            if let window = attachedWindows[id] ?? windowManager.managedWindows[id],
+               let player = videoEngine.player(for: id) {
+                window.attachPlayerLayer(player.playerLayer)
+                if let hView = hudViews[id] {
+                    window.underlyingWindow.contentView?.addSubview(hView)
+                }
+            }
+        }
+
+        reconcileAllScreens()
         refreshMenuBarDisplays()
     }
 
@@ -648,20 +738,38 @@ public final class AppCoordinator: NSObject,
                 let key = String(id)
                 var disp = cfg.displayConfigurations[key] ?? DisplayConfig()
                 disp.photoPath = url.path
+                disp.assetPath = nil
+                disp.shaderName = nil
+                disp.shaderPath = nil
                 disp.isEnabled = true
                 cfg.displayConfigurations[key] = disp
             } else {
                 cfg.photoPath = url.path
+                cfg.defaultAssetPath = nil
+                cfg.shaderName = nil
+                cfg.shaderPath = nil
+                for key in cfg.displayConfigurations.keys {
+                    cfg.displayConfigurations[key]?.assetPath = nil
+                    cfg.displayConfigurations[key]?.shaderName = nil
+                    cfg.displayConfigurations[key]?.shaderPath = nil
+                    cfg.displayConfigurations[key]?.photoPath = url.path
+                }
             }
         }
 
-        if let id = displayID, let window = attachedWindows[id] {
-            attachParallax(to: window, displayID: id, photoURL: url)
+        let targetIDs: [CGDirectDisplayID]
+        if let id = displayID {
+            targetIDs = [id]
         } else {
-            for (id, window) in attachedWindows {
+            targetIDs = Array(Set(windowManager.managedWindows.keys).union(activeDisplayIDs))
+        }
+
+        for id in targetIDs {
+            if let window = attachedWindows[id] ?? windowManager.managedWindows[id] {
                 attachParallax(to: window, displayID: id, photoURL: url)
             }
         }
+        reconcileAllScreens()
         refreshMenuBarDisplays()
     }
 
@@ -684,22 +792,36 @@ public final class AppCoordinator: NSObject,
                 disp.shaderName = preset.rawValue
                 disp.shaderPath = nil
                 disp.photoPath = nil
+                disp.assetPath = nil
                 disp.isEnabled = true
                 cfg.displayConfigurations[key] = disp
             } else {
                 cfg.shaderName = preset.rawValue
                 cfg.shaderPath = nil
                 cfg.photoPath = nil
+                cfg.defaultAssetPath = nil
+                for key in cfg.displayConfigurations.keys {
+                    cfg.displayConfigurations[key]?.assetPath = nil
+                    cfg.displayConfigurations[key]?.photoPath = nil
+                    cfg.displayConfigurations[key]?.shaderPath = nil
+                    cfg.displayConfigurations[key]?.shaderName = preset.rawValue
+                }
             }
         }
 
-        if let id = displayID, let window = attachedWindows[id] {
-            attachShader(to: window, displayID: id, preset: preset)
+        let targetIDs: [CGDirectDisplayID]
+        if let id = displayID {
+            targetIDs = [id]
         } else {
-            for (id, window) in attachedWindows {
+            targetIDs = Array(Set(windowManager.managedWindows.keys).union(activeDisplayIDs))
+        }
+
+        for id in targetIDs {
+            if let window = attachedWindows[id] ?? windowManager.managedWindows[id] {
                 attachShader(to: window, displayID: id, preset: preset)
             }
         }
+        reconcileAllScreens()
         refreshMenuBarDisplays()
     }
 
@@ -716,22 +838,36 @@ public final class AppCoordinator: NSObject,
                 disp.shaderPath = url.path
                 disp.shaderName = nil
                 disp.photoPath = nil
+                disp.assetPath = nil
                 disp.isEnabled = true
                 cfg.displayConfigurations[key] = disp
             } else {
                 cfg.shaderPath = url.path
                 cfg.shaderName = nil
                 cfg.photoPath = nil
+                cfg.defaultAssetPath = nil
+                for key in cfg.displayConfigurations.keys {
+                    cfg.displayConfigurations[key]?.assetPath = nil
+                    cfg.displayConfigurations[key]?.photoPath = nil
+                    cfg.displayConfigurations[key]?.shaderName = nil
+                    cfg.displayConfigurations[key]?.shaderPath = url.path
+                }
             }
         }
 
-        if let id = displayID, let window = attachedWindows[id] {
-            attachShader(to: window, displayID: id, fileURL: url)
+        let targetIDs: [CGDirectDisplayID]
+        if let id = displayID {
+            targetIDs = [id]
         } else {
-            for (id, window) in attachedWindows {
+            targetIDs = Array(Set(windowManager.managedWindows.keys).union(activeDisplayIDs))
+        }
+
+        for id in targetIDs {
+            if let window = attachedWindows[id] ?? windowManager.managedWindows[id] {
                 attachShader(to: window, displayID: id, fileURL: url)
             }
         }
+        reconcileAllScreens()
         refreshMenuBarDisplays()
     }
 

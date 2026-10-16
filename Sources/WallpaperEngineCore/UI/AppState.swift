@@ -21,6 +21,55 @@ public enum GalleryCategory: String, CaseIterable, Identifiable, Sendable {
     public var id: String { rawValue }
 }
 
+public struct WallpaperVideoItem: Identifiable, Hashable, Sendable {
+    public let id: String
+    public let title: String
+    public let url: URL
+    public let filename: String
+    public let resolution: String
+    public let fileSizeFormatted: String
+
+    public init(url: URL) {
+        self.id = url.path
+        self.url = url
+        self.filename = url.lastPathComponent
+
+        var name = url.deletingPathExtension().lastPathComponent
+        var res = "HD Video"
+        if name.contains("3840x2160") || name.contains("4k") || name.contains("4K") {
+            res = "4K UHD 2160p"
+            name = name.replacingOccurrences(of: ".3840x2160", with: "")
+                       .replacingOccurrences(of: "_3840x2160", with: "")
+        } else if name.contains("1920x1080") || name.contains("1080p") {
+            res = "Full HD 1080p"
+            name = name.replacingOccurrences(of: ".1920x1080", with: "")
+                       .replacingOccurrences(of: "_1920x1080", with: "")
+        }
+        self.resolution = res
+
+        let words = name.replacingOccurrences(of: "-", with: " ")
+                        .replacingOccurrences(of: "_", with: " ")
+                        .split(separator: " ")
+        self.title = words.map { $0.capitalized }.joined(separator: " ")
+
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+           let size = attrs[.size] as? Int64 {
+            let mb = Double(size) / (1024 * 1024)
+            self.fileSizeFormatted = String(format: "%.1f MB", mb)
+        } else {
+            self.fileSizeFormatted = "Video"
+        }
+    }
+}
+
+public enum ActiveWallpaperType: Equatable, Sendable {
+    case shader(ProceduralShaderPreset)
+    case customShader(path: String)
+    case parallax(path: String)
+    case video(path: String)
+    case none
+}
+
 @MainActor
 public final class AppState: ObservableObject {
     // MARK: - Navigation
@@ -39,6 +88,7 @@ public final class AppState: ObservableObject {
     @Published public var shaderSpeed: Float = 1.0
     @Published public var isPlaybackPaused: Bool = false
     @Published public var isAudioReactive: Bool = true
+    @Published public var discoveredVideos: [WallpaperVideoItem] = []
 
     // MARK: - Interactive UI View State (Stored in AppState to avoid Command Line Tools SwiftUI macro missing symbols)
     @Published public var galleryCategory: GalleryCategory = .all
@@ -72,6 +122,74 @@ public final class AppState: ObservableObject {
         if let preset = config.shaderPreset {
             self.activeShaderPreset = preset
         }
+        refreshDiscoveredVideos()
+    }
+
+    // MARK: - Wallpaper Discovery & Active Detection
+
+    public func refreshDiscoveredVideos() {
+        var foundURLs: Set<URL> = []
+        let fm = FileManager.default
+
+        // 1. Scan ~/Library/Application Support/WallpaperEngineCore/Wallpapers
+        let appSupport = ConfigPersistenceManager.defaultConfigDirectoryURL
+        let wallpapersDir = appSupport.appendingPathComponent("Wallpapers", isDirectory: true)
+        if let items = try? fm.contentsOfDirectory(at: wallpapersDir, includingPropertiesForKeys: [.fileSizeKey]) {
+            for item in items {
+                let ext = item.pathExtension.lowercased()
+                if ext == "mp4" || ext == "mov" || ext == "m4v" {
+                    foundURLs.insert(item)
+                }
+            }
+        }
+
+        // 2. Add current configured video paths
+        if let defaultPath = config.defaultAssetPath, fm.fileExists(atPath: defaultPath) {
+            foundURLs.insert(URL(fileURLWithPath: defaultPath))
+        }
+        for dispCfg in config.displayConfigurations.values {
+            if let path = dispCfg.assetPath, fm.fileExists(atPath: path) {
+                foundURLs.insert(URL(fileURLWithPath: path))
+            }
+        }
+
+        self.discoveredVideos = foundURLs.map { WallpaperVideoItem(url: $0) }.sorted(by: { $0.title < $1.title })
+    }
+
+    public func activeWallpaper(for displayID: CGDirectDisplayID? = nil) -> ActiveWallpaperType {
+        let targetID = displayID ?? selectedDisplayID
+        if let id = targetID {
+            let key = String(id)
+            if let disp = config.displayConfigurations[key] {
+                if let sName = disp.shaderName, let preset = ProceduralShaderPreset(rawValue: sName) {
+                    return .shader(preset)
+                }
+                if let sPath = disp.shaderPath {
+                    return .customShader(path: sPath)
+                }
+                if let pPath = disp.photoPath {
+                    return .parallax(path: pPath)
+                }
+                if let vPath = disp.assetPath {
+                    return .video(path: vPath)
+                }
+            }
+        }
+
+        // Global fallback
+        if let sName = config.shaderName, let preset = ProceduralShaderPreset(rawValue: sName) {
+            return .shader(preset)
+        }
+        if let sPath = config.shaderPath {
+            return .customShader(path: sPath)
+        }
+        if let pPath = config.photoPath {
+            return .parallax(path: pPath)
+        }
+        if let vPath = config.defaultAssetPath {
+            return .video(path: vPath)
+        }
+        return .none
     }
 
     // MARK: - Telemetry & Media Feeds
@@ -100,16 +218,25 @@ public final class AppState: ObservableObject {
     public func applyShader(preset: ProceduralShaderPreset, displayID: CGDirectDisplayID? = nil) {
         activeShaderPreset = preset
         coordinator?.setShader(preset: preset, for: displayID, speed: shaderSpeed)
+        if let updated = coordinator?.config {
+            self.config = updated
+        }
         showToast("Applied shader '\(preset.displayName)' to \(displayName(for: displayID))")
     }
 
     public func applyShaderFile(url: URL, displayID: CGDirectDisplayID? = nil) {
         coordinator?.setShader(url: url, for: displayID, speed: shaderSpeed)
+        if let updated = coordinator?.config {
+            self.config = updated
+        }
         showToast("Applied custom shader '\(url.lastPathComponent)'")
     }
 
     public func applyParallax(url: URL, displayID: CGDirectDisplayID? = nil) {
         coordinator?.setParallaxPhoto(url: url, for: displayID, useHeadTracking: config.useHeadTracking)
+        if let updated = coordinator?.config {
+            self.config = updated
+        }
         showToast("Applied 3D Parallax Scene '\(url.lastPathComponent)'")
     }
 
@@ -117,7 +244,11 @@ public final class AppState: ObservableObject {
         Task { @MainActor in
             do {
                 try await coordinator?.setVideo(url: url, for: displayID)
-                showToast("Applied video wallpaper '\(url.lastPathComponent)'")
+                if let updated = coordinator?.config {
+                    self.config = updated
+                }
+                refreshDiscoveredVideos()
+                showToast("Applied video wallpaper '\(url.lastPathComponent)' to \(displayName(for: displayID))")
             } catch {
                 showToast("Error setting video: \(error.localizedDescription)")
             }

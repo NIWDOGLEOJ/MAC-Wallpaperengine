@@ -35,12 +35,15 @@ public struct GalleryView: View {
                         }
                     }
 
-                    if state.galleryCategory == .all || state.galleryCategory == .parallax {
-                        parallaxCard
+                    if state.galleryCategory == .all || state.galleryCategory == .videos {
+                        ForEach(state.discoveredVideos) { videoItem in
+                            discoveredVideoCard(for: videoItem)
+                        }
+                        videoPickerCard
                     }
 
-                    if state.galleryCategory == .all || state.galleryCategory == .videos {
-                        videoCard
+                    if state.galleryCategory == .all || state.galleryCategory == .parallax {
+                        parallaxCard
                     }
 
                     if state.galleryCategory == .all || state.galleryCategory == .custom {
@@ -57,6 +60,11 @@ public struct GalleryView: View {
 
     // MARK: - Header View
 
+    private var targetDisplayName: String {
+        guard let id = state.selectedDisplayID else { return "All Displays" }
+        return state.displays.first(where: { $0.displayID == id })?.name ?? "Display \(id)"
+    }
+
     private var headerView: some View {
         HStack {
             VStack(alignment: .leading, spacing: 6) {
@@ -70,8 +78,31 @@ public struct GalleryView: View {
 
             Spacer()
 
-            // Quick Play/Pause & Audio-Reactive status
+            // Display Selector & Quick Controls
             HStack(spacing: 12) {
+                Menu {
+                    Button("All Connected Displays") {
+                        state.selectedDisplayID = nil
+                    }
+                    Divider()
+                    ForEach(state.displays) { disp in
+                        Button(disp.name + (disp.isMain ? " (Main)" : "")) {
+                            state.selectedDisplayID = disp.displayID
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "display")
+                        Text(targetDisplayName)
+                            .font(.system(size: 12, weight: .medium))
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color.primary.opacity(0.06))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+                .menuStyle(.borderlessButton)
+
                 Button(action: { state.togglePlayback() }) {
                     Label(state.isPlaybackPaused ? "Resume" : "Pause", systemImage: state.isPlaybackPaused ? "play.fill" : "pause.fill")
                         .font(.system(size: 13, weight: .medium))
@@ -116,7 +147,7 @@ public struct GalleryView: View {
     // MARK: - Shader Preset Card
 
     private func shaderCard(for preset: ProceduralShaderPreset) -> some View {
-        let isCurrentlyActive = state.activeShaderPreset == preset && state.config.photoPath == nil && state.config.shaderPath == nil
+        let isCurrentlyActive = state.activeWallpaper(for: state.selectedDisplayID) == .shader(preset)
 
         return VStack(alignment: .leading, spacing: 12) {
             // Live / Styled Card Banner
@@ -203,13 +234,179 @@ public struct GalleryView: View {
             RoundedRectangle(cornerRadius: 16)
                 .stroke(isCurrentlyActive ? Color.accentColor : Color.primary.opacity(0.08), lineWidth: isCurrentlyActive ? 2 : 1)
         )
+        .contentShape(RoundedRectangle(cornerRadius: 16))
+        .onTapGesture {
+            state.applyShader(preset: preset, displayID: state.selectedDisplayID)
+        }
+    }
+
+    // MARK: - Discovered Looping Video Card
+
+    private func discoveredVideoCard(for item: WallpaperVideoItem) -> some View {
+        let isCurrentlyActive = state.activeWallpaper(for: state.selectedDisplayID) == .video(path: item.url.path)
+
+        return VStack(alignment: .leading, spacing: 12) {
+            ZStack(alignment: .topTrailing) {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(LinearGradient(colors: [Color.indigo.opacity(0.7), Color.teal.opacity(0.8)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(height: 150)
+                    .overlay(
+                        VStack(spacing: 6) {
+                            Image(systemName: "film.stack.fill")
+                                .font(.system(size: 40))
+                                .foregroundColor(.white.opacity(0.9))
+                            Text(item.resolution)
+                                .font(.caption2.bold())
+                                .foregroundColor(.white.opacity(0.85))
+                        }
+                    )
+
+                if isCurrentlyActive {
+                    Text("ACTIVE")
+                        .font(.system(size: 10, weight: .bold))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.green)
+                        .foregroundColor(.white)
+                        .clipShape(Capsule())
+                        .padding(10)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text(item.title)
+                        .font(.headline)
+                        .lineLimit(1)
+
+                    Spacer()
+
+                    HStack(spacing: 4) {
+                        Image(systemName: "video.fill")
+                            .font(.system(size: 10))
+                        Text(item.fileSizeFormatted)
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .foregroundColor(.secondary)
+                }
+
+                Text(item.filename)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+
+                HStack(spacing: 6) {
+                    badgeView(text: item.resolution, icon: "tv")
+                    badgeView(text: "AVFoundation HW", icon: "cpu")
+                }
+                .padding(.top, 4)
+            }
+
+            Divider()
+
+            HStack {
+                Button(action: {
+                    NSWorkspace.shared.activateFileViewerSelecting([item.url])
+                }) {
+                    Text("Reveal")
+                        .font(.system(size: 12))
+                }
+                .buttonStyle(.bordered)
+
+                Spacer()
+
+                Button(action: {
+                    state.applyVideo(url: item.url, displayID: state.selectedDisplayID)
+                }) {
+                    Label(isCurrentlyActive ? "Applied" : "Apply", systemImage: isCurrentlyActive ? "checkmark" : "arrow.up.forward.app")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.teal)
+            }
+        }
+        .padding(14)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.8))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(isCurrentlyActive ? Color.teal : Color.primary.opacity(0.08), lineWidth: isCurrentlyActive ? 2 : 1)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 16))
+        .onTapGesture {
+            state.applyVideo(url: item.url, displayID: state.selectedDisplayID)
+        }
+    }
+
+    // MARK: - Video Import Picker Card
+
+    private var videoPickerCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(LinearGradient(colors: [Color.blue.opacity(0.2), Color.teal.opacity(0.2)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(height: 150)
+                    .overlay(
+                        VStack(spacing: 8) {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.system(size: 38))
+                                .foregroundColor(.secondary)
+                            Text("Import Custom Video")
+                                .font(.caption.bold())
+                                .foregroundColor(.secondary)
+                        }
+                    )
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Select from Disk...")
+                    .font(.headline)
+
+                Text("Import any 4K/1080p MP4 or MOV file into your desktop wallpaper engine.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .lineLimit(2)
+
+                HStack(spacing: 6) {
+                    badgeView(text: "MP4 / MOV", icon: "play.rectangle")
+                    badgeView(text: "Zero Overhead", icon: "leaf")
+                }
+                .padding(.top, 4)
+            }
+
+            Divider()
+
+            Button(action: { selectVideoFile() }) {
+                Label("Browse Files...", systemImage: "folder.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.teal)
+        }
+        .padding(14)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.8))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 16))
+        .onTapGesture {
+            selectVideoFile()
+        }
     }
 
     // MARK: - Parallax Card
 
     private var parallaxCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            ZStack {
+        let isCurrentlyActive: Bool = {
+            if case .parallax = state.activeWallpaper(for: state.selectedDisplayID) { return true }
+            return false
+        }()
+
+        return VStack(alignment: .leading, spacing: 12) {
+            ZStack(alignment: .topTrailing) {
                 RoundedRectangle(cornerRadius: 12)
                     .fill(LinearGradient(colors: [Color.blue.opacity(0.6), Color.purple.opacity(0.7)], startPoint: .topLeading, endPoint: .bottomTrailing))
                     .frame(height: 150)
@@ -223,6 +420,17 @@ public struct GalleryView: View {
                                 .foregroundColor(.white.opacity(0.8))
                         }
                     )
+
+                if isCurrentlyActive {
+                    Text("ACTIVE")
+                        .font(.system(size: 10, weight: .bold))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.green)
+                        .foregroundColor(.white)
+                        .clipShape(Capsule())
+                        .padding(10)
+                }
             }
 
             VStack(alignment: .leading, spacing: 6) {
@@ -244,7 +452,7 @@ public struct GalleryView: View {
             Divider()
 
             Button(action: { selectParallaxPhoto() }) {
-                Label("Select Photo...", systemImage: "plus.circle.fill")
+                Label(isCurrentlyActive ? "Change Photo..." : "Select Photo...", systemImage: "plus.circle.fill")
                     .font(.system(size: 12, weight: .semibold))
                     .frame(maxWidth: .infinity)
             }
@@ -256,70 +464,24 @@ public struct GalleryView: View {
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay(
             RoundedRectangle(cornerRadius: 16)
-                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                .stroke(isCurrentlyActive ? Color.purple : Color.primary.opacity(0.08), lineWidth: isCurrentlyActive ? 2 : 1)
         )
-    }
-
-    // MARK: - Looping Video Card
-
-    private var videoCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(LinearGradient(colors: [Color.indigo.opacity(0.6), Color.teal.opacity(0.7)], startPoint: .topLeading, endPoint: .bottomTrailing))
-                    .frame(height: 150)
-                    .overlay(
-                        VStack(spacing: 8) {
-                            Image(systemName: "film.fill")
-                                .font(.system(size: 40))
-                                .foregroundColor(.white.opacity(0.9))
-                            Text("AVFoundation Hardware")
-                                .font(.caption2.bold())
-                                .foregroundColor(.white.opacity(0.8))
-                        }
-                    )
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Looping Video Wallpaper")
-                    .font(.headline)
-
-                Text("Seamless looping video decoding with zero black-flashes, 4-tier audio suppression, and < 5% CPU.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .lineLimit(2)
-
-                HStack(spacing: 6) {
-                    badgeView(text: "Gapless Loop", icon: "repeat")
-                    badgeView(text: "MP4 / MOV", icon: "play.rectangle")
-                }
-                .padding(.top, 4)
-            }
-
-            Divider()
-
-            Button(action: { selectVideoFile() }) {
-                Label("Select Video...", systemImage: "folder.fill")
-                    .font(.system(size: 12, weight: .semibold))
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(.teal)
+        .contentShape(RoundedRectangle(cornerRadius: 16))
+        .onTapGesture {
+            selectParallaxPhoto()
         }
-        .padding(14)
-        .background(Color(NSColor.controlBackgroundColor).opacity(0.8))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-        )
     }
 
     // MARK: - Custom Shader Card
 
     private var customShaderCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            ZStack {
+        let isCurrentlyActive: Bool = {
+            if case .customShader = state.activeWallpaper(for: state.selectedDisplayID) { return true }
+            return false
+        }()
+
+        return VStack(alignment: .leading, spacing: 12) {
+            ZStack(alignment: .topTrailing) {
                 RoundedRectangle(cornerRadius: 12)
                     .fill(LinearGradient(colors: [Color.orange.opacity(0.6), Color.pink.opacity(0.7)], startPoint: .topLeading, endPoint: .bottomTrailing))
                     .frame(height: 150)
@@ -333,6 +495,17 @@ public struct GalleryView: View {
                                 .foregroundColor(.white.opacity(0.8))
                         }
                     )
+
+                if isCurrentlyActive {
+                    Text("ACTIVE")
+                        .font(.system(size: 10, weight: .bold))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.green)
+                        .foregroundColor(.white)
+                        .clipShape(Capsule())
+                        .padding(10)
+                }
             }
 
             VStack(alignment: .leading, spacing: 6) {
@@ -375,8 +548,12 @@ public struct GalleryView: View {
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay(
             RoundedRectangle(cornerRadius: 16)
-                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                .stroke(isCurrentlyActive ? Color.orange : Color.primary.opacity(0.08), lineWidth: isCurrentlyActive ? 2 : 1)
         )
+        .contentShape(RoundedRectangle(cornerRadius: 16))
+        .onTapGesture {
+            state.showingCustomShaderSheet = true
+        }
     }
 
     // MARK: - Helpers

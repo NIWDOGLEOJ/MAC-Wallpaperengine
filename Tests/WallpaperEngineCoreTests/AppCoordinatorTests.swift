@@ -252,6 +252,56 @@ public struct AppCoordinatorTests {
 
                 coordinator.stop()
             }
+
+            // Test 9: Mutual Exclusion Enforcement between Shaders, Videos, and Photos
+            await runner.testAsync("Mutual exclusion: setting video clears shader and tears down shader view; setting shader clears video") {
+                let storage = MockConfigStorage()
+                let videoEngine = VideoEngine(windowManager: nil)
+                let coordinator = AppCoordinator(configStorage: storage, videoEngine: videoEngine)
+                coordinator.start()
+
+                let window1 = MockDesktopWindow(frame: CGRect(x: 0, y: 0, width: 1920, height: 1080), displayID: 1)
+                coordinator.desktopWindowManager(coordinator.windowManager, didAddWindow: window1, for: 1)
+
+                // 1. Set shader
+                coordinator.setShader(preset: .aurora, for: 1)
+                try assertEqual(coordinator.config.displayConfigurations["1"]?.shaderName, "aurora", "Display 1 shader set to aurora")
+                try assertNil(coordinator.config.displayConfigurations["1"]?.assetPath, "Display 1 assetPath is nil")
+                try assertNotNil(coordinator.shaderViews[1], "Display 1 has shader view attached")
+
+                // 2. Set video
+                let dummyVideoURL = try await SyntheticVideoGenerator.createValidVideoFile()
+                defer { try? FileManager.default.removeItem(at: dummyVideoURL) }
+                try await coordinator.setVideo(url: dummyVideoURL, for: 1)
+
+                try assertEqual(coordinator.config.displayConfigurations["1"]?.assetPath, dummyVideoURL.path, "Display 1 assetPath set to video")
+                try assertNil(coordinator.config.displayConfigurations["1"]?.shaderName, "Display 1 shaderName cleared cleanly")
+                try assertNil(coordinator.shaderViews[1], "Display 1 shader view cleanly torn down")
+
+                // 3. Set another shader
+                coordinator.setShader(preset: .cyberpunkGrid, for: 1)
+                try assertEqual(coordinator.config.displayConfigurations["1"]?.shaderName, "cyberpunkGrid", "Shader switched to cyberpunkGrid")
+                try assertNil(coordinator.config.displayConfigurations["1"]?.assetPath, "assetPath cleared cleanly on shader set")
+                try assertNotNil(coordinator.shaderViews[1], "Shader view re-attached")
+
+                coordinator.stop()
+            }
+
+            // Test 10: AppState Active Wallpaper Detection & Discovery
+            runner.test("AppState resolves active wallpaper type and discovers local videos") {
+                var config = EngineConfig.default
+                config.displayConfigurations["1"] = DisplayConfig(assetPath: "/wallpapers/samurai.mp4")
+                let state = AppState(config: config)
+
+                let active = state.activeWallpaper(for: 1)
+                try assertEqual(active, .video(path: "/wallpapers/samurai.mp4"), "Display 1 active wallpaper detected as video")
+
+                // Test shader detection
+                config.displayConfigurations["1"] = DisplayConfig(shaderName: "starfield")
+                state.config = config
+                let activeShader = state.activeWallpaper(for: 1)
+                try assertEqual(activeShader, .shader(.starfield), "Display 1 active wallpaper detected as starfield shader")
+            }
         }
     }
 }
