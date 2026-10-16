@@ -26,6 +26,7 @@ public final class DesktopHUDView: NSView {
     // 2. System Stats Widget
     private let statsContainer = NSStackView()
     private let cpuBadge = SystemStatBadgeView(title: "CPU", accentColor: WallpaperColorExtractor.auroraAccent)
+    private let gpuBadge = SystemStatBadgeView(title: "GPU", accentColor: WallpaperColorExtractor.cyberpunkGridAccent)
     private let ramBadge = SystemStatBadgeView(title: "RAM", accentColor: WallpaperColorExtractor.starfieldAccent)
     private let fpsBadge = SystemStatBadgeView(title: "FPS", accentColor: WallpaperColorExtractor.gradientFlowAccent)
 
@@ -218,11 +219,12 @@ public final class DesktopHUDView: NSView {
     private func setupStatsWidget() {
         statsContainer.orientation = .horizontal
         statsContainer.alignment = .centerY
-        statsContainer.spacing = 10
+        statsContainer.spacing = 8
         statsContainer.distribution = .fillEqually
         statsContainer.translatesAutoresizingMaskIntoConstraints = false
 
         statsContainer.addArrangedSubview(cpuBadge)
+        statsContainer.addArrangedSubview(gpuBadge)
         statsContainer.addArrangedSubview(ramBadge)
         statsContainer.addArrangedSubview(fpsBadge)
 
@@ -236,6 +238,7 @@ public final class DesktopHUDView: NSView {
 
     public func updateTelemetry(_ telemetry: SystemTelemetry) {
         cpuBadge.setValue(String(format: "%.0f%%", telemetry.cpuPercentage), progress: telemetry.cpuPercentage / 100.0)
+        gpuBadge.setValue(String(format: "%.0f%%", telemetry.gpuPercentage), progress: telemetry.gpuPercentage / 100.0)
         ramBadge.setValue(String(format: "%.1fG", telemetry.ramUsedGB), progress: telemetry.ramPercentage / 100.0)
         fpsBadge.setValue("\(telemetry.fps)", progress: Float(telemetry.fps) / 144.0)
     }
@@ -397,9 +400,16 @@ public final class DesktopHUDView: NSView {
             musicGlyphLabel.textColor = theme.accent
             miniEqualizerView.updateAccentColor(theme.accent)
 
-            // 4. Badges (CPU, RAM, FPS) with Harmonious Wallpaper Accents
+            // 4. Badges (CPU, GPU, RAM, FPS) with Harmonious Wallpaper Accents
             cpuBadge.updateTheme(
                 accentColor: theme.primary,
+                surfaceColor: theme.surface,
+                textColor: theme.textPrimary,
+                borderColor: theme.border,
+                isDarkMode: theme.isDark
+            )
+            gpuBadge.updateTheme(
+                accentColor: theme.accent,
                 surfaceColor: theme.surface,
                 textColor: theme.textPrimary,
                 borderColor: theme.border,
@@ -549,7 +559,7 @@ final class SystemStatBadgeView: NSView {
         titleLabel.textColor = accentColor
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        valueLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .semibold)
+        valueLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
         valueLabel.textColor = .white
         valueLabel.translatesAutoresizingMaskIntoConstraints = false
 

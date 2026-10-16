@@ -8,6 +8,7 @@
 
 import Darwin
 import Foundation
+import IOKit
 import MachO
 
 public struct SystemTelemetry: Sendable, Equatable {
@@ -114,7 +115,11 @@ public final class SystemTelemetryMonitor: @unchecked Sendable {
         let cpu = sampleCPULoad()
         let ram = sampleRAM()
         let fps = lock.withLock { currentFPS }
-        let gpu = min(100.0, max(5.0, cpu * 0.8 + Float(fps) * 0.15))
+        var gpu = sampleGPULoad()
+        if gpu <= 0.0 && cpu > 0.0 {
+            // Graceful fallback if IOKit accelerator stats are not exposed in a VM environment
+            gpu = min(100.0, max(2.0, cpu * 0.75 + Float(fps) * 0.12))
+        }
 
         let telemetry = SystemTelemetry(
             cpuPercentage: cpu,
@@ -130,6 +135,35 @@ public final class SystemTelemetryMonitor: @unchecked Sendable {
         lock.unlock()
 
         onTelemetryUpdate?(telemetry)
+    }
+
+    // MARK: - IOKit GPU Accelerator Sampling
+
+    private func sampleGPULoad() -> Float {
+        var iterator: io_iterator_t = 0
+        let matchingDict = IOServiceMatching("IOAccelerator")
+        guard IOServiceGetMatchingServices(kIOMainPortDefault, matchingDict, &iterator) == kIOReturnSuccess else {
+            return 0.0
+        }
+        defer { IOObjectRelease(iterator) }
+
+        var service = IOIteratorNext(iterator)
+        while service != 0 {
+            var props: Unmanaged<CFMutableDictionary>?
+            if IORegistryEntryCreateCFProperties(service, &props, kCFAllocatorDefault, 0) == kIOReturnSuccess,
+               let dict = props?.takeRetainedValue() as? [String: Any],
+               let stats = dict["PerformanceStatistics"] as? [String: Any] {
+                IOObjectRelease(service)
+                if let devUtil = stats["Device Utilization %"] as? NSNumber {
+                    return max(0.0, min(100.0, devUtil.floatValue))
+                } else if let renUtil = stats["Renderer Utilization %"] as? NSNumber {
+                    return max(0.0, min(100.0, renUtil.floatValue))
+                }
+            }
+            IOObjectRelease(service)
+            service = IOIteratorNext(iterator)
+        }
+        return 0.0
     }
 
     // MARK: - Mach Kernel CPU Sampling

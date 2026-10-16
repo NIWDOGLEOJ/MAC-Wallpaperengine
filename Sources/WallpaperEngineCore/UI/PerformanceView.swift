@@ -50,7 +50,7 @@ public struct PerformanceView: View {
             Label("Live Hardware Telemetry", systemImage: "gauge.with.needle.fill")
                 .font(.headline)
 
-            HStack(spacing: 20) {
+            HStack(spacing: 14) {
                 // Rendering FPS
                 telemetryGauge(
                     title: "Rendering Frame Rate",
@@ -65,6 +65,14 @@ public struct PerformanceView: View {
                     valueString: String(format: "%.1f%%", state.telemetry.cpuPercentage),
                     subtitle: "Mach host thread probe",
                     color: .blue
+                )
+
+                // Apple GPU %
+                telemetryGauge(
+                    title: "Apple GPU Usage",
+                    valueString: String(format: "%.1f%%", state.telemetry.gpuPercentage),
+                    subtitle: "IOKit accelerator pipe",
+                    color: .orange
                 )
 
                 // Host Physical RAM

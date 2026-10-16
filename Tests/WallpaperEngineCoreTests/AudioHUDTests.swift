@@ -109,6 +109,7 @@ public struct AudioHUDTests {
                 monitor.sampleTelemetry()
                 let sampled = monitor.latestTelemetry
                 try assertTrue(sampled.cpuPercentage >= 0.0 && sampled.cpuPercentage <= 100.0, "CPU percentage is bounded [0, 100]")
+                try assertTrue(sampled.gpuPercentage >= 0.0 && sampled.gpuPercentage <= 100.0, "GPU percentage is bounded [0, 100]")
                 try assertTrue(sampled.ramPercentage >= 0.0 && sampled.ramPercentage <= 100.0, "RAM percentage is bounded [0, 100]")
                 try assertTrue(sampled.ramUsedGB > 0.0, "RAM used is non-zero")
                 try assertTrue(sampled.ramUsedGB <= sampled.ramTotalGB * 1.5, "RAM used does not exceed physical limit")

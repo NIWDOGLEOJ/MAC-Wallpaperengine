@@ -187,9 +187,10 @@ public struct DesktopHUDStudioView: View {
                         .foregroundColor(textPri)
                 }
 
-                HStack(spacing: 4) {
-                    Text("CPU: 18%").font(.system(size: 7)).foregroundColor(accent)
-                    Text("RAM: 8.4GB").font(.system(size: 7)).foregroundColor(textSec)
+                HStack(spacing: 3) {
+                    Text("CPU: 18%").font(.system(size: 6)).foregroundColor(accent)
+                    Text("GPU: 24%").font(.system(size: 6)).foregroundColor(accent)
+                    Text("RAM: 8.4G").font(.system(size: 6)).foregroundColor(textSec)
                 }
 
                 if state.config.hudConfig.showNowPlaying {
@@ -248,7 +249,7 @@ public struct DesktopHUDStudioView: View {
 
                 Divider()
 
-                widgetToggleRow(title: "System Hardware Telemetry", subtitle: "Mach host CPU %, physical RAM, and live rendering FPS", isOn: Binding(
+                widgetToggleRow(title: "System Hardware Telemetry", subtitle: "Mach host CPU %, Apple GPU load %, physical RAM, and live rendering FPS", isOn: Binding(
                     get: { state.config.hudConfig.showSystemStats },
                     set: { val in state.updateHUDConfig { $0.showSystemStats = val } }
                 ))
