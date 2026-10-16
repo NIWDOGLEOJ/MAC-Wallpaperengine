@@ -38,7 +38,7 @@ An open-source, high-performance native macOS live desktop wallpaper engine. Bui
 
 ### Option 1: Direct Download (.dmg)
 Download the standalone macOS application installer directly:
-- **Download Link**: [**Download WallpaperEngine-v1.0.0.dmg**](https://github.com/NIWDOGLEOJ/MAC-Wallpaperengine/releases/latest/download/WallpaperEngine-v1.0.0.dmg)
+- **Download Link**: [**Download WallpaperEngine-v1.1.0.dmg**](https://github.com/NIWDOGLEOJ/MAC-Wallpaperengine/releases/latest/download/WallpaperEngine-v1.1.0.dmg)
 - Open the downloaded `.dmg` file.
 - Drag **Wallpaper Engine.app** into your **Applications** folder.
 - Double-click **Wallpaper Engine** to launch! The interactive management window and Menu Bar item will appear immediately.
@@ -48,7 +48,7 @@ To package the app and `.dmg` locally at any time:
 ```bash
 ./scripts/package_app.sh
 ```
-This automatically compiles the optimized release binary, bundles `Wallpaper Engine.app` with icons and CoreML models, ad-hoc codesigns the app, and outputs `dist/WallpaperEngine-v1.0.0.dmg`.
+This automatically compiles the optimized release binary, bundles `Wallpaper Engine.app` with icons and CoreML models, ad-hoc codesigns the app, and outputs `dist/WallpaperEngine-v1.1.0.dmg`.
 
 ---
 

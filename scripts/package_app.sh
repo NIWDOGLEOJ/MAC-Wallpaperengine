@@ -8,7 +8,8 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 DIST_DIR="$REPO_ROOT/dist"
 APP_NAME="Wallpaper Engine"
 APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
-DMG_NAME="WallpaperEngine-v1.0.0.dmg"
+VERSION="${1:-$(defaults read "$REPO_ROOT/Resources/Info.plist" CFBundleShortVersionString 2>/dev/null || echo "1.1.0")}"
+DMG_NAME="WallpaperEngine-v${VERSION}.dmg"
 DMG_PATH="$DIST_DIR/$DMG_NAME"
 STAGING_DIR="$DIST_DIR/dmg_staging"
 
@@ -73,6 +74,10 @@ rm -rf "$STAGING_DIR"
 
 echo "==> 6. Verifying disk image..."
 hdiutil verify "$DMG_PATH"
+
+# Compatibility copies
+cp -f "$DMG_PATH" "$DIST_DIR/WallpaperEngine.dmg"
+cp -f "$DMG_PATH" "$DIST_DIR/WallpaperEngine-v1.0.0.dmg"
 
 echo "==> DMG generated successfully:"
 ls -lh "$DMG_PATH"
