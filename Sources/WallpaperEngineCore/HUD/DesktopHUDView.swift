@@ -3,7 +3,8 @@
 //  WallpaperEngineCore
 //
 //  Glassmorphic desktop overlay widgets featuring customizable typography clock,
-//  live CPU/RAM/GPU telemetry monitors, Now Playing track card, and real-time audio visualizer.
+//  live CPU/RAM/GPU telemetry monitors, Now Playing track card, real-time audio visualizer,
+//  dynamic wallpaper accent color styling, and bidirectional macOS system preference (Light/Dark) synchronization.
 //
 
 import AppKit
@@ -24,9 +25,9 @@ public final class DesktopHUDView: NSView {
 
     // 2. System Stats Widget
     private let statsContainer = NSStackView()
-    private let cpuBadge = SystemStatBadgeView(title: "CPU", accentColor: NSColor.systemTeal)
-    private let ramBadge = SystemStatBadgeView(title: "RAM", accentColor: NSColor.systemPurple)
-    private let fpsBadge = SystemStatBadgeView(title: "FPS", accentColor: NSColor.systemOrange)
+    private let cpuBadge = SystemStatBadgeView(title: "CPU", accentColor: WallpaperColorExtractor.auroraAccent)
+    private let ramBadge = SystemStatBadgeView(title: "RAM", accentColor: WallpaperColorExtractor.starfieldAccent)
+    private let fpsBadge = SystemStatBadgeView(title: "FPS", accentColor: WallpaperColorExtractor.gradientFlowAccent)
 
     // 3. Now Playing Widget
     private let nowPlayingContainer = NSView()
@@ -39,20 +40,35 @@ public final class DesktopHUDView: NSView {
     private let spectrumContainer = NSView()
     private var spectrumBars: [CALayer] = []
 
-    // State & Timers
+    // State, Accent Color & Appearance
     private var clockTimer: Timer?
+    private var appearanceObserver: NSObjectProtocol?
     public var config: EngineConfig.HUDConfig = .init()
+    public private(set) var currentAccentColor: NSColor = WallpaperColorExtractor.auroraAccent
+
+    public var isDarkMode: Bool {
+        let appearance = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) ?? NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua])
+        return appearance == .darkAqua
+    }
 
     public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         setupGlassmorphicHierarchy()
         startClockTimer()
+        setupAppearanceObserver()
+        updateThemeAppearance()
     }
 
     public required init?(coder: NSCoder) {
         super.init(coder: coder)
         setupGlassmorphicHierarchy()
         startClockTimer()
+        setupAppearanceObserver()
+        updateThemeAppearance()
+    }
+
+    deinit {
+        // Observers cleaned up
     }
 
     public override func viewWillMove(toSuperview newSuperview: NSView?) {
@@ -60,13 +76,43 @@ public final class DesktopHUDView: NSView {
         if newSuperview == nil {
             clockTimer?.invalidate()
             clockTimer = nil
+            teardownAppearanceObserver()
+        } else if clockTimer == nil {
+            startClockTimer()
+            setupAppearanceObserver()
         }
     }
 
     public override func removeFromSuperview() {
         clockTimer?.invalidate()
         clockTimer = nil
+        teardownAppearanceObserver()
         super.removeFromSuperview()
+    }
+
+    public override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateThemeAppearance()
+    }
+
+    private func setupAppearanceObserver() {
+        guard appearanceObserver == nil else { return }
+        appearanceObserver = DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name("AppleInterfaceStyleChangedNotification"),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.updateThemeAppearance()
+            }
+        }
+    }
+
+    private func teardownAppearanceObserver() {
+        if let obs = appearanceObserver {
+            DistributedNotificationCenter.default().removeObserver(obs)
+            appearanceObserver = nil
+        }
     }
 
     // MARK: - Glassmorphic Hierarchy Setup
@@ -76,7 +122,6 @@ public final class DesktopHUDView: NSView {
 
         // Outer Glow & Shadow
         shadow = NSShadow()
-        shadow?.shadowColor = NSColor.black.withAlphaComponent(0.4)
         shadow?.shadowOffset = NSSize(width: 0, height: -6)
         shadow?.shadowBlurRadius = 18
 
@@ -92,8 +137,6 @@ public final class DesktopHUDView: NSView {
             glassLayer.cornerRadius = 20.0
             glassLayer.masksToBounds = true
             glassLayer.borderWidth = 1.0
-            glassLayer.borderColor = NSColor(white: 1.0, alpha: 0.18).cgColor
-            glassLayer.backgroundColor = NSColor(white: 0.08, alpha: 0.55).cgColor
         }
         addSubview(visualEffectView)
 
@@ -124,12 +167,10 @@ public final class DesktopHUDView: NSView {
         clockContainer.translatesAutoresizingMaskIntoConstraints = false
 
         timeLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 34, weight: .semibold)
-        timeLabel.textColor = .white
         timeLabel.alignment = .center
         timeLabel.translatesAutoresizingMaskIntoConstraints = false
 
         dateLabel.font = NSFont.systemFont(ofSize: 13, weight: .medium)
-        dateLabel.textColor = NSColor(white: 0.85, alpha: 0.9)
         dateLabel.alignment = .center
         dateLabel.translatesAutoresizingMaskIntoConstraints = false
 
@@ -206,22 +247,18 @@ public final class DesktopHUDView: NSView {
 
         if let layer = nowPlayingContainer.layer {
             layer.cornerRadius = 12
-            layer.backgroundColor = NSColor(white: 0.15, alpha: 0.4).cgColor
             layer.borderWidth = 1
-            layer.borderColor = NSColor(white: 1.0, alpha: 0.12).cgColor
         }
 
         musicGlyphLabel.font = NSFont.systemFont(ofSize: 18, weight: .bold)
-        musicGlyphLabel.textColor = NSColor.systemPink
+        musicGlyphLabel.textColor = currentAccentColor
         musicGlyphLabel.translatesAutoresizingMaskIntoConstraints = false
 
         trackTitleLabel.font = NSFont.systemFont(ofSize: 13, weight: .bold)
-        trackTitleLabel.textColor = .white
         trackTitleLabel.lineBreakMode = .byTruncatingTail
         trackTitleLabel.translatesAutoresizingMaskIntoConstraints = false
 
         trackArtistLabel.font = NSFont.systemFont(ofSize: 11, weight: .regular)
-        trackArtistLabel.textColor = NSColor(white: 0.75, alpha: 0.85)
         trackArtistLabel.lineBreakMode = .byTruncatingTail
         trackArtistLabel.translatesAutoresizingMaskIntoConstraints = false
 
@@ -261,17 +298,17 @@ public final class DesktopHUDView: NSView {
         if let track = info, track.isPlaying {
             trackTitleLabel.stringValue = track.title
             trackArtistLabel.stringValue = "\(track.artist) • \(track.source)"
-            musicGlyphLabel.textColor = track.source == "Spotify" ? NSColor.systemGreen : NSColor.systemPink
+            musicGlyphLabel.textColor = track.source == "Spotify" ? NSColor.systemGreen : currentAccentColor
             miniEqualizerView.startAnimating()
         } else if let track = info {
             trackTitleLabel.stringValue = track.title
             trackArtistLabel.stringValue = "Paused • \(track.source)"
-            musicGlyphLabel.textColor = NSColor.gray
+            musicGlyphLabel.textColor = isDarkMode ? NSColor.gray : NSColor.darkGray
             miniEqualizerView.stopAnimating()
         } else {
             trackTitleLabel.stringValue = "No Media Playing"
             trackArtistLabel.stringValue = "Spotify / Apple Music"
-            musicGlyphLabel.textColor = NSColor(white: 0.6, alpha: 1)
+            musicGlyphLabel.textColor = isDarkMode ? NSColor(white: 0.6, alpha: 1) : NSColor(white: 0.45, alpha: 1)
             miniEqualizerView.stopAnimating()
         }
     }
@@ -298,22 +335,12 @@ public final class DesktopHUDView: NSView {
             bar.cornerRadius = 2
             let x = CGFloat(i) * (barWidth + spacing)
             bar.frame = CGRect(x: x, y: 0, width: barWidth, height: 4)
-
-            // Dynamic gradient coloring: Cyan -> Magenta -> Gold
-            let progress = CGFloat(i) / CGFloat(barCount)
-            let color = NSColor(
-                calibratedHue: 0.5 - 0.45 * progress,
-                saturation: 0.85,
-                brightness: 0.95,
-                alpha: 0.85
-            ).cgColor
-            bar.backgroundColor = color
-
             spectrumContainer.layer?.addSublayer(bar)
             spectrumBars.append(bar)
         }
 
         contentStack.addArrangedSubview(spectrumContainer)
+        updateSpectrumColors()
     }
 
     public func updateSpectrum(_ spectrum: AudioSpectrumData) {
@@ -334,6 +361,85 @@ public final class DesktopHUDView: NSView {
         CATransaction.commit()
     }
 
+    // MARK: - Dynamic Wallpaper Accent & Theme Synchronization
+
+    public func applyWallpaperAccentColor(_ color: NSColor) {
+        self.currentAccentColor = color
+        updateThemeAppearance()
+    }
+
+    public func updateThemeAppearance() {
+        let dark = isDarkMode
+
+        // 1. Visual Effect & Outer Backdrop
+        visualEffectView.material = dark ? .hudWindow : .sheet
+        shadow?.shadowColor = dark ? NSColor.black.withAlphaComponent(0.45) : NSColor.black.withAlphaComponent(0.12)
+
+        if let glassLayer = visualEffectView.layer {
+            glassLayer.backgroundColor = dark
+                ? NSColor(white: 0.08, alpha: 0.65).cgColor
+                : NSColor(white: 0.96, alpha: 0.82).cgColor
+            glassLayer.borderColor = dark
+                ? currentAccentColor.withAlphaComponent(0.35).cgColor
+                : currentAccentColor.withAlphaComponent(0.25).cgColor
+        }
+
+        // 2. Clock & Date Typography
+        timeLabel.textColor = dark ? .white : NSColor(white: 0.08, alpha: 1.0)
+        dateLabel.textColor = dark ? NSColor(white: 0.85, alpha: 0.90) : NSColor(white: 0.35, alpha: 0.95)
+
+        // 3. Now Playing Card Styling
+        if let npLayer = nowPlayingContainer.layer {
+            npLayer.backgroundColor = dark
+                ? NSColor(white: 0.15, alpha: 0.45).cgColor
+                : NSColor(white: 0.0, alpha: 0.05).cgColor
+            npLayer.borderColor = dark
+                ? NSColor(white: 1.0, alpha: 0.12).cgColor
+                : NSColor(white: 0.0, alpha: 0.08).cgColor
+        }
+
+        trackTitleLabel.textColor = dark ? .white : NSColor(white: 0.10, alpha: 1.0)
+        trackArtistLabel.textColor = dark ? NSColor(white: 0.75, alpha: 0.85) : NSColor(white: 0.38, alpha: 0.95)
+        musicGlyphLabel.textColor = currentAccentColor
+
+        // 4. Badges (CPU, RAM, FPS) with Harmonious Wallpaper Accents
+        let secondary = WallpaperColorExtractor.secondaryAccentColor(for: currentAccentColor)
+        let complementary = WallpaperColorExtractor.complementaryAccentColor(for: currentAccentColor)
+
+        cpuBadge.updateTheme(accentColor: currentAccentColor, isDarkMode: dark)
+        ramBadge.updateTheme(accentColor: secondary, isDarkMode: dark)
+        fpsBadge.updateTheme(accentColor: complementary, isDarkMode: dark)
+
+        // 5. Mini Equalizer & Spectrum Bars
+        miniEqualizerView.updateAccentColor(currentAccentColor)
+        updateSpectrumColors()
+    }
+
+    private func updateSpectrumColors() {
+        let secondary = WallpaperColorExtractor.secondaryAccentColor(for: currentAccentColor)
+        let total = max(1, spectrumBars.count - 1)
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for (i, bar) in spectrumBars.enumerated() {
+            let progress = CGFloat(i) / CGFloat(total)
+            let color = interpolateColor(from: currentAccentColor, to: secondary, progress: progress)
+            bar.backgroundColor = color.cgColor
+        }
+        CATransaction.commit()
+    }
+
+    private func interpolateColor(from start: NSColor, to end: NSColor, progress: CGFloat) -> NSColor {
+        guard let c1 = start.usingColorSpace(.sRGB),
+              let c2 = end.usingColorSpace(.sRGB) else { return start }
+        let p = max(0.0, min(1.0, progress))
+        let r = c1.redComponent + (c2.redComponent - c1.redComponent) * p
+        let g = c1.greenComponent + (c2.greenComponent - c1.greenComponent) * p
+        let b = c1.blueComponent + (c2.blueComponent - c1.blueComponent) * p
+        let a = c1.alphaComponent + (c2.alphaComponent - c1.alphaComponent) * p
+        return NSColor(srgbRed: r, green: g, blue: b, alpha: a)
+    }
+
     // MARK: - Configuration & Layout Updates
 
     public func applyConfig(_ hudConfig: EngineConfig.HUDConfig) {
@@ -348,7 +454,6 @@ public final class DesktopHUDView: NSView {
 
     public func updatePlacement(in screenFrame: CGRect) {
         let hudWidth: CGFloat = 326
-        // Compute fitting size based on visible subviews
         let targetSize = fittingSize
         let hudHeight = max(90, targetSize.height)
 
@@ -387,8 +492,10 @@ final class SystemStatBadgeView: NSView {
     private let titleLabel = NSTextField(labelWithString: "")
     private let valueLabel = NSTextField(labelWithString: "0%")
     private let progressLayer = CALayer()
+    private var currentAccentColor: NSColor
 
     init(title: String, accentColor: NSColor) {
+        self.currentAccentColor = accentColor
         super.init(frame: .zero)
         wantsLayer = true
 
@@ -428,6 +535,22 @@ final class SystemStatBadgeView: NSView {
 
     required init?(coder: NSCoder) { fatalError() }
 
+    func updateTheme(accentColor: NSColor, isDarkMode: Bool) {
+        self.currentAccentColor = accentColor
+        titleLabel.textColor = accentColor
+        valueLabel.textColor = isDarkMode ? .white : NSColor(white: 0.10, alpha: 1.0)
+        progressLayer.backgroundColor = accentColor.withAlphaComponent(isDarkMode ? 0.35 : 0.25).cgColor
+
+        if let l = layer {
+            l.backgroundColor = isDarkMode
+                ? NSColor(white: 0.15, alpha: 0.45).cgColor
+                : NSColor(white: 0.0, alpha: 0.05).cgColor
+            l.borderColor = isDarkMode
+                ? NSColor(white: 1.0, alpha: 0.12).cgColor
+                : NSColor(white: 0.0, alpha: 0.08).cgColor
+        }
+    }
+
     func setValue(_ string: String, progress: Float) {
         valueLabel.stringValue = string
         CATransaction.begin()
@@ -447,6 +570,7 @@ final class SystemStatBadgeView: NSView {
 final class MiniEqualizerBarView: NSView {
     private var bars: [CALayer] = []
     private var isPlaying: Bool = false
+    private var currentAccentColor: NSColor = .systemPink
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -456,7 +580,7 @@ final class MiniEqualizerBarView: NSView {
         for i in 0..<5 {
             let bar = CALayer()
             bar.cornerRadius = 1.5
-            bar.backgroundColor = NSColor.systemPink.cgColor
+            bar.backgroundColor = currentAccentColor.cgColor
             bar.frame = CGRect(x: CGFloat(i) * (barWidth + gap), y: 0, width: barWidth, height: 4)
             layer?.addSublayer(bar)
             bars.append(bar)
@@ -464,6 +588,16 @@ final class MiniEqualizerBarView: NSView {
     }
 
     required init?(coder: NSCoder) { fatalError() }
+
+    func updateAccentColor(_ color: NSColor) {
+        self.currentAccentColor = color
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for bar in bars {
+            bar.backgroundColor = color.cgColor
+        }
+        CATransaction.commit()
+    }
 
     func startAnimating() { isPlaying = true }
     func stopAnimating() {

@@ -46,6 +46,8 @@ public protocol AppCoordinatorProtocol: AnyObject {
     func setShader(preset: ProceduralShaderPreset, for displayID: CGDirectDisplayID?, speed: Float?)
     func setShader(url: URL, for displayID: CGDirectDisplayID?, speed: Float?)
     func attachOrUpdateHUD(for displayID: CGDirectDisplayID, in window: DesktopWindowProtocol)
+    func activeWallpaperType(for displayID: CGDirectDisplayID) -> ActiveWallpaperType
+    func syncWallpaperAccentColor(for displayID: CGDirectDisplayID)
     func updateConfig(_ update: (inout EngineConfig) -> Void)
     func reconcileAllScreens()
     func flushConfigToDisk()
@@ -379,6 +381,65 @@ public final class AppCoordinator: NSObject,
 
         // Always ensure HUD is frontmost in window's contentView
         window.underlyingWindow.contentView?.addSubview(hudView)
+        syncWallpaperAccentColor(for: displayID)
+    }
+
+    public func activeWallpaperType(for displayID: CGDirectDisplayID) -> ActiveWallpaperType {
+        let key = String(displayID)
+        if let disp = config.displayConfigurations[key] {
+            if let sName = disp.shaderName, let preset = ProceduralShaderPreset(rawValue: sName) {
+                return .shader(preset)
+            }
+            if let sPath = disp.shaderPath {
+                return .customShader(path: sPath)
+            }
+            if let pPath = disp.photoPath {
+                return .parallax(path: pPath)
+            }
+            if let vPath = disp.assetPath {
+                return .video(path: vPath)
+            }
+        }
+        if let sName = config.shaderName, let preset = ProceduralShaderPreset(rawValue: sName) {
+            return .shader(preset)
+        }
+        if let sPath = config.shaderPath {
+            return .customShader(path: sPath)
+        }
+        if let pPath = config.photoPath {
+            return .parallax(path: pPath)
+        }
+        if let vPath = config.defaultAssetPath {
+            return .video(path: vPath)
+        }
+        return .none
+    }
+
+    public func syncWallpaperAccentColor(for displayID: CGDirectDisplayID) {
+        guard let hudView = hudViews[displayID] else { return }
+        let wallpaperType = activeWallpaperType(for: displayID)
+        let color = WallpaperColorExtractor.shared.dominantAccentColor(for: wallpaperType)
+        hudView.applyWallpaperAccentColor(color)
+        appState?.updateActiveWallpaperAccentColor()
+
+        // If it's a video or photo, run async extraction to ensure exact color
+        switch wallpaperType {
+        case .video(let path):
+            let url = URL(fileURLWithPath: path)
+            Task { @MainActor [weak self, weak hudView] in
+                let extracted = await WallpaperColorExtractor.shared.extractAccentColor(fromVideoAt: url)
+                hudView?.applyWallpaperAccentColor(extracted)
+                self?.appState?.activeWallpaperAccentColor = extracted
+            }
+        case .parallax(let path):
+            let url = URL(fileURLWithPath: path)
+            if let extracted = WallpaperColorExtractor.shared.extractAccentColor(fromImageAt: url) {
+                hudView.applyWallpaperAccentColor(extracted)
+                appState?.activeWallpaperAccentColor = extracted
+            }
+        default:
+            break
+        }
     }
 
     private func attachShader(to window: DesktopWindowProtocol, displayID: CGDirectDisplayID, preset: ProceduralShaderPreset) {
@@ -419,6 +480,7 @@ public final class AppCoordinator: NSObject,
         if let hView = hudViews[displayID] {
             window.underlyingWindow.contentView?.addSubview(hView)
         }
+        syncWallpaperAccentColor(for: displayID)
     }
 
     private func attachShader(to window: DesktopWindowProtocol, displayID: CGDirectDisplayID, fileURL: URL) {
@@ -459,6 +521,7 @@ public final class AppCoordinator: NSObject,
         if let hView = hudViews[displayID] {
             window.underlyingWindow.contentView?.addSubview(hView)
         }
+        syncWallpaperAccentColor(for: displayID)
     }
 
     private func attachParallax(to window: DesktopWindowProtocol, displayID: CGDirectDisplayID, photoURL: URL) {
@@ -490,6 +553,7 @@ public final class AppCoordinator: NSObject,
         if let hView = hudViews[displayID] {
             window.underlyingWindow.contentView?.addSubview(hView)
         }
+        syncWallpaperAccentColor(for: displayID)
 
         Task { @MainActor [weak self] in
             do {
@@ -721,6 +785,7 @@ public final class AppCoordinator: NSObject,
                     window.underlyingWindow.contentView?.addSubview(hView)
                 }
             }
+            syncWallpaperAccentColor(for: id)
         }
 
         reconcileAllScreens()

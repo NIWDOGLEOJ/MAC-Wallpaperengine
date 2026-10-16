@@ -89,6 +89,7 @@ public final class AppState: ObservableObject {
     @Published public var isPlaybackPaused: Bool = false
     @Published public var isAudioReactive: Bool = true
     @Published public var discoveredVideos: [WallpaperVideoItem] = []
+    @Published public var activeWallpaperAccentColor: NSColor = WallpaperColorExtractor.auroraAccent
 
     // MARK: - Interactive UI View State (Stored in AppState to avoid Command Line Tools SwiftUI macro missing symbols)
     @Published public var galleryCategory: GalleryCategory = .all
@@ -123,6 +124,7 @@ public final class AppState: ObservableObject {
             self.activeShaderPreset = preset
         }
         refreshDiscoveredVideos()
+        updateActiveWallpaperAccentColor()
     }
 
     // MARK: - Wallpaper Discovery & Active Detection
@@ -213,6 +215,11 @@ public final class AppState: ObservableObject {
         }
     }
 
+    public func updateActiveWallpaperAccentColor() {
+        let active = activeWallpaper()
+        self.activeWallpaperAccentColor = WallpaperColorExtractor.shared.dominantAccentColor(for: active)
+    }
+
     // MARK: - Engine Control Actions
 
     public func applyShader(preset: ProceduralShaderPreset, displayID: CGDirectDisplayID? = nil) {
@@ -221,6 +228,7 @@ public final class AppState: ObservableObject {
         if let updated = coordinator?.config {
             self.config = updated
         }
+        updateActiveWallpaperAccentColor()
         showToast("Applied shader '\(preset.displayName)' to \(displayName(for: displayID))")
     }
 
@@ -229,6 +237,7 @@ public final class AppState: ObservableObject {
         if let updated = coordinator?.config {
             self.config = updated
         }
+        updateActiveWallpaperAccentColor()
         showToast("Applied custom shader '\(url.lastPathComponent)'")
     }
 
@@ -237,6 +246,7 @@ public final class AppState: ObservableObject {
         if let updated = coordinator?.config {
             self.config = updated
         }
+        updateActiveWallpaperAccentColor()
         showToast("Applied 3D Parallax Scene '\(url.lastPathComponent)'")
     }
 
@@ -248,6 +258,7 @@ public final class AppState: ObservableObject {
                     self.config = updated
                 }
                 refreshDiscoveredVideos()
+                updateActiveWallpaperAccentColor()
                 showToast("Applied video wallpaper '\(url.lastPathComponent)' to \(displayName(for: displayID))")
             } catch {
                 showToast("Error setting video: \(error.localizedDescription)")

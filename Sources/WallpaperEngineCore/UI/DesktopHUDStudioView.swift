@@ -107,6 +107,36 @@ public struct DesktopHUDStudioView: View {
                     .padding(18)
             }
             .frame(maxWidth: .infinity)
+
+            // Dynamic Wallpaper Color & Theme Sync Banner
+            HStack(spacing: 12) {
+                Circle()
+                    .fill(Color(state.activeWallpaperAccentColor))
+                    .frame(width: 14, height: 14)
+                    .overlay(Circle().stroke(Color.white.opacity(0.4), lineWidth: 1))
+                    .shadow(color: Color(state.activeWallpaperAccentColor).opacity(0.6), radius: 4)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Dynamic Wallpaper Accent Synchronized")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text("Widget spectrum, telemetry badges, and accents adapt in real time to the active wallpaper. Theme syncs with macOS Light/Dark preferences.")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                }
+                Spacer()
+
+                HStack(spacing: 6) {
+                    Image(systemName: "circle.lefthalf.filled")
+                        .font(.system(size: 12))
+                    Text("macOS Auto-Sync")
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.primary.opacity(0.08))
+                .clipShape(Capsule())
+            }
+            .padding(.top, 4)
         }
         .padding(18)
         .background(Color(NSColor.controlBackgroundColor).opacity(0.8))
@@ -127,7 +157,7 @@ public struct DesktopHUDStudioView: View {
                 .font(.system(size: 10, weight: isSelected ? .bold : .medium))
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
-                .background(isSelected ? Color.accentColor : Color.primary.opacity(0.25))
+                .background(isSelected ? Color(state.activeWallpaperAccentColor) : Color.primary.opacity(0.25))
                 .foregroundColor(.white)
                 .clipShape(Capsule())
                 .shadow(radius: isSelected ? 4 : 0)
@@ -138,30 +168,35 @@ public struct DesktopHUDStudioView: View {
     // Mini preview card rendered on top of the mockup
     private var miniHUDPreview: some View {
         let pos = state.config.hudConfig.position
+        let accent = Color(state.activeWallpaperAccentColor)
 
         return GeometryReader { geo in
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 4) {
-                    Circle().fill(Color.green).frame(width: 5, height: 5)
+                    Circle().fill(accent).frame(width: 5, height: 5)
                     Text("10:42 PM")
                         .font(.system(size: 9, weight: .bold))
                 }
 
                 HStack(spacing: 4) {
-                    Text("CPU: 18%").font(.system(size: 7)).foregroundColor(.secondary)
+                    Text("CPU: 18%").font(.system(size: 7)).foregroundColor(accent)
                     Text("RAM: 8.4GB").font(.system(size: 7)).foregroundColor(.secondary)
                 }
 
                 if state.config.hudConfig.showNowPlaying {
                     Text("♪ Starboy - The Weeknd")
                         .font(.system(size: 7, weight: .medium))
-                        .foregroundColor(.accentColor)
+                        .foregroundColor(accent)
                         .lineLimit(1)
                 }
             }
             .padding(8)
             .background(.ultraThinMaterial)
             .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(accent.opacity(0.35), lineWidth: 1)
+            )
             .shadow(radius: 6)
             .frame(width: 110)
             .position(miniHUDCoordinates(for: pos, in: geo.size))

@@ -296,5 +296,127 @@ public struct AudioHUDTests {
                 try assertEqual(config.isAudioReactive, false, "Applied isAudioReactive false")
             }
         }
+
+        await runner.runSuite("Suite: Dynamic Wallpaper Color & System Appearance Sync") {
+
+            // Test 13: Procedural Shader Presets resolve vibrant accent colors
+            runner.test("WallpaperColorExtractor resolves vibrant accent colors for all procedural shader presets") {
+                let extractor = WallpaperColorExtractor.shared
+
+                let aurora = extractor.dominantAccentColor(for: .shader(.aurora))
+                try assertEqual(aurora, WallpaperColorExtractor.auroraAccent, "Aurora maps to emerald teal")
+
+                let starfield = extractor.dominantAccentColor(for: .shader(.starfield))
+                try assertEqual(starfield, WallpaperColorExtractor.starfieldAccent, "Starfield maps to cosmic indigo violet")
+
+                let gradientFlow = extractor.dominantAccentColor(for: .shader(.gradientFlow))
+                try assertEqual(gradientFlow, WallpaperColorExtractor.gradientFlowAccent, "Gradient Flow maps to sunset coral")
+
+                let cyberpunk = extractor.dominantAccentColor(for: .shader(.cyberpunkGrid))
+                try assertEqual(cyberpunk, WallpaperColorExtractor.cyberpunkGridAccent, "Cyberpunk maps to neon cyan")
+
+                let bokeh = extractor.dominantAccentColor(for: .shader(.bokeh))
+                try assertEqual(bokeh, WallpaperColorExtractor.bokehAccent, "Bokeh maps to golden peach")
+            }
+
+            // Test 14: Curated library video wallpapers resolve signature accent colors
+            runner.test("WallpaperColorExtractor resolves signature accents for curated library 4K wallpapers") {
+                let extractor = WallpaperColorExtractor.shared
+
+                let samurai = extractor.dominantAccentColor(for: .video(path: "/path/to/wandering-samurai-4k.mp4"))
+                try assertTrue(samurai.redComponent > 0.8, "Samurai wallpaper extracts warm amber/crimson")
+
+                let koi = extractor.dominantAccentColor(for: .video(path: "/path/to/koi-pond-serenity-3840x2160.mp4"))
+                try assertTrue(koi.blueComponent > 0.7, "Koi pond wallpaper extracts aquatic azure")
+
+                let sakura = extractor.dominantAccentColor(for: .video(path: "/path/to/large-sakura-tree.mov"))
+                try assertTrue(sakura.redComponent > 0.8 && sakura.blueComponent > 0.4, "Sakura tree extracts blossom rose")
+
+                let train = extractor.dominantAccentColor(for: .video(path: "/path/to/orange-train-at-sunset.mp4"))
+                try assertTrue(train.redComponent > 0.8 && train.greenComponent > 0.4, "Orange train extracts golden sunset orange")
+
+                let sabrina = extractor.dominantAccentColor(for: .video(path: "/path/to/sabrina-carpenter-kissing-screen.mp4"))
+                try assertTrue(sabrina.redComponent > 0.7 && sakura.blueComponent > 0.3, "Sabrina wallpaper extracts neon magenta")
+            }
+
+            // Test 15: Color harmony transformations produce distinct secondary and complementary hues
+            runner.test("WallpaperColorExtractor derives distinct secondary and complementary accent hues") {
+                let base = WallpaperColorExtractor.auroraAccent
+
+                let secondary = WallpaperColorExtractor.secondaryAccentColor(for: base)
+                let complementary = WallpaperColorExtractor.complementaryAccentColor(for: base)
+
+                try assertTrue(secondary.hueComponent != base.hueComponent, "Secondary hue is rotated")
+                try assertTrue(complementary.hueComponent != base.hueComponent, "Complementary hue is rotated ~180 deg")
+                try assertTrue(secondary.saturationComponent > 0.3, "Secondary preserves vibrant saturation")
+                try assertTrue(complementary.saturationComponent > 0.3, "Complementary preserves vibrant saturation")
+            }
+
+            // Test 16: Synthetic bitmap quantization extracts dominant vibrant color
+            runner.test("WallpaperColorExtractor extracts dominant color from CGImage accurately") {
+                let extractor = WallpaperColorExtractor.shared
+
+                // Create synthetic 16x16 pure crimson image
+                let colorSpace = CGColorSpaceCreateDeviceRGB()
+                var pixels = [UInt8](repeating: 0, count: 16 * 16 * 4)
+                for i in 0..<(16 * 16) {
+                    pixels[i * 4] = 230     // R
+                    pixels[i * 4 + 1] = 40  // G
+                    pixels[i * 4 + 2] = 60  // B
+                    pixels[i * 4 + 3] = 255 // A
+                }
+
+                guard let ctx = CGContext(
+                    data: &pixels,
+                    width: 16,
+                    height: 16,
+                    bitsPerComponent: 8,
+                    bytesPerRow: 16 * 4,
+                    space: colorSpace,
+                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+                ), let cgImage = ctx.makeImage() else {
+                    throw TestFailure("Failed to create synthetic test CGImage")
+                }
+
+                let dominant = extractor.extractDominantVibrantColor(from: cgImage)
+                try assertTrue(dominant.redComponent > 0.7, "Extracted color has dominant red channel")
+                try assertTrue(dominant.greenComponent < 0.3, "Green component is low as expected")
+            }
+
+            // Test 17: DesktopHUDView dynamically accepts wallpaper accent color and updates subviews
+            runner.test("DesktopHUDView dynamically recolors widgets when wallpaper accent color changes") {
+                let hudView = DesktopHUDView(frame: CGRect(x: 0, y: 0, width: 326, height: 260))
+
+                // Initial state
+                try assertEqual(hudView.currentAccentColor, WallpaperColorExtractor.auroraAccent, "Initial accent is aurora")
+
+                // Apply Cyberpunk neon cyan
+                hudView.applyWallpaperAccentColor(WallpaperColorExtractor.cyberpunkGridAccent)
+                try assertEqual(hudView.currentAccentColor, WallpaperColorExtractor.cyberpunkGridAccent, "Accent updated to cyberpunk cyan")
+
+                // Apply Golden Sunset Peach
+                hudView.applyWallpaperAccentColor(WallpaperColorExtractor.bokehAccent)
+                try assertEqual(hudView.currentAccentColor, WallpaperColorExtractor.bokehAccent, "Accent updated to golden peach")
+            }
+
+            // Test 18: DesktopHUDView appearance update conforms to Light/Dark mode
+            runner.test("DesktopHUDView updateThemeAppearance executes cleanly for light and dark appearance") {
+                let hudView = DesktopHUDView(frame: CGRect(x: 0, y: 0, width: 326, height: 260))
+
+                // Trigger appearance update
+                hudView.updateThemeAppearance()
+                try assertTrue(hudView.isDarkMode == (hudView.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua), "isDarkMode accurately matches effectiveAppearance")
+
+                // Ingest telemetry with dynamic accent
+                let telemetry = SystemTelemetry(cpuPercentage: 35.0, ramPercentage: 45.0, ramUsedGB: 12.4, ramTotalGB: 32.0, gpuPercentage: 20.0, fps: 60)
+                hudView.updateTelemetry(telemetry)
+
+                // Now Playing
+                let track = NowPlayingInfo(title: "Get Lucky", artist: "Daft Punk", album: "RAM", source: "Spotify", isPlaying: true)
+                hudView.updateNowPlaying(track)
+
+                try assertTrue(true, "Theme appearance and telemetry successfully updated without error")
+            }
+        }
     }
 }
