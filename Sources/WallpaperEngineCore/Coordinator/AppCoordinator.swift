@@ -26,6 +26,7 @@ public protocol AppCoordinatorProtocol: AnyObject {
 
     var parallaxViews: [CGDirectDisplayID: ParallaxWallpaperView] { get }
     var shaderViews: [CGDirectDisplayID: ShaderWallpaperView] { get }
+    var cpuWallpaperViews: [CGDirectDisplayID: CPULiveWallpaperView] { get }
     var hudViews: [CGDirectDisplayID: DesktopHUDView] { get }
     var audioCapture: SystemAudioCapture { get }
     var nowPlayingMonitor: NowPlayingMonitor { get }
@@ -50,6 +51,7 @@ public protocol AppCoordinatorProtocol: AnyObject {
     func activeWallpaperType(for displayID: CGDirectDisplayID) -> ActiveWallpaperType
     func syncWallpaperAccentColor(for displayID: CGDirectDisplayID)
     func updateConfig(_ update: (inout EngineConfig) -> Void)
+    func setCPUOnlyEngine(_ enabled: Bool)
     func reconcileAllScreens()
     func flushConfigToDisk()
 }
@@ -80,6 +82,7 @@ public final class AppCoordinator: NSObject,
     private var attachedWindows: [CGDirectDisplayID: DesktopWindowProtocol] = [:]
     public private(set) var parallaxViews: [CGDirectDisplayID: ParallaxWallpaperView] = [:]
     public private(set) var shaderViews: [CGDirectDisplayID: ShaderWallpaperView] = [:]
+    public private(set) var cpuWallpaperViews: [CGDirectDisplayID: CPULiveWallpaperView] = [:]
     public private(set) var hudViews: [CGDirectDisplayID: DesktopHUDView] = [:]
     public let audioCapture: SystemAudioCapture
     public let nowPlayingMonitor: NowPlayingMonitor
@@ -126,6 +129,7 @@ public final class AppCoordinator: NSObject,
         self.audioCapture = audioCapture
         self.nowPlayingMonitor = nowPlayingMonitor
         self.telemetryMonitor = telemetryMonitor
+        self.telemetryMonitor.isCPUOnlyMode = resolvedConfig.useCPUOnlyEngine
         self.themeManager = ThemeManager(settings: resolvedConfig.hudConfig.themeSettings)
         self.currentPowerState = powerObserver.currentState
         self.currentSleepLockState = sleepLockObserver.currentState
@@ -188,10 +192,15 @@ public final class AppCoordinator: NSObject,
         self.audioCapture.onSpectrumUpdate = { [weak self] spectrum in
             Task { @MainActor [weak self] in
                 guard let self = self, self.isRunning else { return }
-                self.appState?.updateAudioSpectrum(spectrum)
+                if self.appState?.selectedTab == .audio {
+                    self.appState?.updateAudioSpectrum(spectrum)
+                }
                 if self.config.isAudioReactive {
                     for sView in self.shaderViews.values {
                         sView.updateAudio(spectrum: spectrum)
+                    }
+                    for cView in self.cpuWallpaperViews.values {
+                        cView.updateAudio(spectrum: spectrum)
                     }
                 }
                 if self.config.hudConfig.isEnabled && self.config.hudConfig.showAudioVisualizer {
@@ -310,6 +319,12 @@ public final class AppCoordinator: NSObject,
         }
         shaderViews.removeAll()
 
+        for (_, cView) in cpuWallpaperViews {
+            cView.pause()
+            cView.removeFromSuperview()
+        }
+        cpuWallpaperViews.removeAll()
+
         for (_, hView) in hudViews {
             hView.removeFromSuperview()
         }
@@ -331,6 +346,21 @@ public final class AppCoordinator: NSObject,
         videoEngine.registerDisplay(displayID)
 
         let dispConfig = config.displayConfigurations[String(displayID)]
+
+        // 0. CPU-Only Engine Mode Priority (Strictly 0% GPU)
+        if config.useCPUOnlyEngine {
+            let preset: ProceduralShaderPreset
+            if let dCfg = dispConfig, let sName = dCfg.shaderName, let p = ProceduralShaderPreset(rawValue: sName) {
+                preset = p
+            } else if let sName = config.shaderName, let p = ProceduralShaderPreset(rawValue: sName) {
+                preset = p
+            } else {
+                preset = .aurora
+            }
+            attachCPUShader(to: window, displayID: displayID, preset: preset)
+            attachOrUpdateHUD(for: displayID, in: window)
+            return
+        }
 
         // 1. Resolve display-specific configuration first
         if let dCfg = dispConfig {
@@ -425,6 +455,9 @@ public final class AppCoordinator: NSObject,
     }
 
     public func activeWallpaperType(for displayID: CGDirectDisplayID) -> ActiveWallpaperType {
+        if let cpuView = cpuWallpaperViews[displayID] {
+            return .shader(cpuView.currentPreset)
+        }
         let key = String(displayID)
         if let disp = config.displayConfigurations[key] {
             if let sName = disp.shaderName, let preset = ProceduralShaderPreset(rawValue: sName) {
@@ -480,7 +513,52 @@ public final class AppCoordinator: NSObject,
         themeManager.monitor.notifyApplicationWallpaperChange(displayID: displayID, type: sourceType)
     }
 
+    private func attachCPUShader(to window: DesktopWindowProtocol, displayID: CGDirectDisplayID, preset: ProceduralShaderPreset) {
+        window.removePlayerLayer()
+        videoEngine.setPlaybackState(.paused(reason: .userRequested), for: displayID)
+
+        shaderViews[displayID]?.pause()
+        shaderViews[displayID]?.removeFromSuperview()
+        shaderViews.removeValue(forKey: displayID)
+
+        parallaxViews[displayID]?.pause()
+        parallaxViews[displayID]?.removeFromSuperview()
+        parallaxViews.removeValue(forKey: displayID)
+
+        if let existing = cpuWallpaperViews[displayID] {
+            existing.loadPreset(preset)
+            existing.setSpeed(config.shaderSpeed)
+            existing.setTargetFrameRate(min(config.targetFrameRate, 30))
+            existing.resume()
+            logger.info("Updated CPU live wallpaper to '\(preset.displayName)' on display \(displayID)")
+        } else {
+            let frame = window.underlyingWindow.contentView?.bounds ?? window.frame
+            let cpuView = CPULiveWallpaperView(frame: frame, preset: preset)
+            cpuView.autoresizingMask = [.width, .height]
+            cpuView.setSpeed(config.shaderSpeed)
+            cpuView.setTargetFrameRate(min(config.targetFrameRate, 30))
+
+            window.underlyingWindow.contentView?.addSubview(cpuView)
+            cpuWallpaperViews[displayID] = cpuView
+            logger.info("CPU live wallpaper '\(preset.displayName)' attached to display \(displayID)")
+        }
+
+        if let hView = hudViews[displayID] {
+            window.underlyingWindow.contentView?.addSubview(hView)
+        }
+        syncWallpaperAccentColor(for: displayID)
+    }
+
     private func attachShader(to window: DesktopWindowProtocol, displayID: CGDirectDisplayID, preset: ProceduralShaderPreset) {
+        if config.useCPUOnlyEngine {
+            attachCPUShader(to: window, displayID: displayID, preset: preset)
+            return
+        }
+
+        cpuWallpaperViews[displayID]?.pause()
+        cpuWallpaperViews[displayID]?.removeFromSuperview()
+        cpuWallpaperViews.removeValue(forKey: displayID)
+
         window.removePlayerLayer()
         videoEngine.setPlaybackState(.paused(reason: .userRequested), for: displayID)
 
@@ -522,6 +600,10 @@ public final class AppCoordinator: NSObject,
     }
 
     private func attachShader(to window: DesktopWindowProtocol, displayID: CGDirectDisplayID, fileURL: URL) {
+        cpuWallpaperViews[displayID]?.pause()
+        cpuWallpaperViews[displayID]?.removeFromSuperview()
+        cpuWallpaperViews.removeValue(forKey: displayID)
+
         window.removePlayerLayer()
         videoEngine.setPlaybackState(.paused(reason: .userRequested), for: displayID)
 
@@ -563,6 +645,10 @@ public final class AppCoordinator: NSObject,
     }
 
     private func attachParallax(to window: DesktopWindowProtocol, displayID: CGDirectDisplayID, photoURL: URL) {
+        cpuWallpaperViews[displayID]?.pause()
+        cpuWallpaperViews[displayID]?.removeFromSuperview()
+        cpuWallpaperViews.removeValue(forKey: displayID)
+
         window.removePlayerLayer()
         videoEngine.setPlaybackState(.paused(reason: .userRequested), for: displayID)
 
@@ -645,12 +731,17 @@ public final class AppCoordinator: NSObject,
                 sView.resume()
                 sView.setTargetFrameRate(fps)
             }
+            if let cView = cpuWallpaperViews[displayID] {
+                cView.resume()
+                cView.setTargetFrameRate(min(fps, 30))
+            }
         case .pause(let reasons):
             telemetryMonitor.currentFPS = 0
             let primaryReason = reasons.sorted(by: { $0.rawValue < $1.rawValue }).first ?? .userRequested
             videoEngine.setPlaybackState(.paused(reason: primaryReason), for: displayID)
             parallaxViews[displayID]?.pause()
             shaderViews[displayID]?.pause()
+            cpuWallpaperViews[displayID]?.pause()
         case .throttle(let fps, _):
             telemetryMonitor.currentFPS = fps
             videoEngine.setPlaybackState(.throttled(fps: fps), for: displayID)
@@ -661,6 +752,10 @@ public final class AppCoordinator: NSObject,
             if let sView = shaderViews[displayID] {
                 sView.resume()
                 sView.setTargetFrameRate(fps)
+            }
+            if let cView = cpuWallpaperViews[displayID] {
+                cView.resume()
+                cView.setTargetFrameRate(min(fps, 30))
             }
         }
     }
@@ -810,6 +905,11 @@ public final class AppCoordinator: NSObject,
                 sView.pause()
                 sView.removeFromSuperview()
                 shaderViews.removeValue(forKey: id)
+            }
+            if let cView = cpuWallpaperViews[id] {
+                cView.pause()
+                cView.removeFromSuperview()
+                cpuWallpaperViews.removeValue(forKey: id)
             }
             if let pView = parallaxViews[id] {
                 pView.pause()
@@ -978,6 +1078,7 @@ public final class AppCoordinator: NSObject,
 
     public func updateConfig(_ update: (inout EngineConfig) -> Void) {
         update(&config)
+        telemetryMonitor.isCPUOnlyMode = config.useCPUOnlyEngine
         appState?.config = config
         menuBarController?.updateConfig(config)
         themeManager.settings = config.hudConfig.themeSettings
@@ -986,6 +1087,39 @@ public final class AppCoordinator: NSObject,
         }
         reconcileAllScreens()
         scheduleConfigSave()
+    }
+
+    public func setCPUOnlyEngine(_ enabled: Bool) {
+        updateConfig { cfg in
+            cfg.useCPUOnlyEngine = enabled
+        }
+        telemetryMonitor.isCPUOnlyMode = enabled
+
+        let targetIDs = Array(Set(windowManager.managedWindows.keys).union(activeDisplayIDs))
+        for id in targetIDs {
+            guard let window = attachedWindows[id] ?? windowManager.managedWindows[id] else { continue }
+            if enabled {
+                // Switch from GPU/Metal/Video to 100% CPU Live Wallpaper
+                let preset: ProceduralShaderPreset
+                if let shaderView = shaderViews[id], let current = shaderView.currentPreset {
+                    preset = current
+                } else if let sName = config.shaderName, let p = ProceduralShaderPreset(rawValue: sName) {
+                    preset = p
+                } else {
+                    preset = .aurora
+                }
+                attachCPUShader(to: window, displayID: id, preset: preset)
+            } else {
+                // Switch back from CPU to Metal GPU acceleration
+                if let cpuView = cpuWallpaperViews[id] {
+                    attachShader(to: window, displayID: id, preset: cpuView.currentPreset)
+                } else if let sName = config.shaderName, let preset = ProceduralShaderPreset(rawValue: sName) {
+                    attachShader(to: window, displayID: id, preset: preset)
+                }
+            }
+        }
+        reconcileAllScreens()
+        refreshMenuBarDisplays()
     }
 
     private func scheduleConfigSave() {
@@ -1055,6 +1189,11 @@ public final class AppCoordinator: NSObject,
             sView.pause()
             sView.removeFromSuperview()
             shaderViews.removeValue(forKey: displayID)
+        }
+        if let cView = cpuWallpaperViews[displayID] {
+            cView.pause()
+            cView.removeFromSuperview()
+            cpuWallpaperViews.removeValue(forKey: displayID)
         }
         if let pView = parallaxViews[displayID] {
             pView.pause()

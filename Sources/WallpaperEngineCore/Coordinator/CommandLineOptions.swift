@@ -41,6 +41,9 @@ public struct CommandLineOptions: Equatable, Sendable {
     public var hudPosition: EngineConfig.HUDConfig.HUDPosition?
     public var isAudioReactive: Bool?
 
+    // Rendering Engine Mode
+    public var useCPUOnlyEngine: Bool?
+
     // Convenience aliases
     public var displayID: CGDirectDisplayID? {
         get { targetDisplayID }
@@ -74,6 +77,7 @@ public struct CommandLineOptions: Equatable, Sendable {
         isHUDEnabled: Bool? = nil,
         hudPosition: EngineConfig.HUDConfig.HUDPosition? = nil,
         isAudioReactive: Bool? = nil,
+        useCPUOnlyEngine: Bool? = nil,
         targetDisplayID: CGDirectDisplayID? = nil,
         displayID: CGDirectDisplayID? = nil,
         targetFPS: Int? = nil,
@@ -103,6 +107,7 @@ public struct CommandLineOptions: Equatable, Sendable {
         self.isHUDEnabled = isHUDEnabled
         self.hudPosition = hudPosition
         self.isAudioReactive = isAudioReactive
+        self.useCPUOnlyEngine = useCPUOnlyEngine
         self.targetDisplayID = targetDisplayID ?? displayID
         let resolvedFPS = targetFPS ?? targetFrameRate
         self.targetFPS = resolvedFPS.flatMap { $0 > 0 ? $0 : nil }
@@ -347,6 +352,14 @@ public struct CommandLineOptions: Equatable, Sendable {
                 options.isAudioReactive = false
                 idx += 1
 
+            case "--cpu-only", "--no-gpu":
+                options.useCPUOnlyEngine = true
+                idx += 1
+
+            case "--gpu", "--metal":
+                options.useCPUOnlyEngine = false
+                idx += 1
+
             default:
                 unknown.append(token)
                 idx += 1
@@ -427,6 +440,10 @@ public struct CommandLineOptions: Equatable, Sendable {
             options.isAudioReactive = (value.lowercased() != "false" && value != "0")
         case "--no-audio-reactive":
             options.isAudioReactive = false
+        case "--cpu-only", "--no-gpu":
+            options.useCPUOnlyEngine = (value.lowercased() != "false" && value != "0")
+        case "--gpu", "--metal":
+            options.useCPUOnlyEngine = !(value.lowercased() != "false" && value != "0")
         default:
             unknown.append("\(flag)=\(value)")
         }
@@ -527,6 +544,9 @@ public struct CommandLineOptions: Equatable, Sendable {
         }
         if let audio = isAudioReactive {
             config.isAudioReactive = audio
+        }
+        if let cpuOnly = useCPUOnlyEngine {
+            config.useCPUOnlyEngine = cpuOnly
         }
     }
 

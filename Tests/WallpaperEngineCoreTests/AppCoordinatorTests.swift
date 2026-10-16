@@ -256,8 +256,10 @@ public struct AppCoordinatorTests {
             // Test 9: Mutual Exclusion Enforcement between Shaders, Videos, and Photos
             await runner.testAsync("Mutual exclusion: setting video clears shader and tears down shader view; setting shader clears video") {
                 let storage = MockConfigStorage()
+                var cfg = EngineConfig.default
+                cfg.useCPUOnlyEngine = false
                 let videoEngine = VideoEngine(windowManager: nil)
-                let coordinator = AppCoordinator(configStorage: storage, videoEngine: videoEngine)
+                let coordinator = AppCoordinator(config: cfg, configStorage: storage, videoEngine: videoEngine)
                 coordinator.start()
 
                 let window1 = MockDesktopWindow(frame: CGRect(x: 0, y: 0, width: 1920, height: 1080), displayID: 1)
@@ -283,6 +285,39 @@ public struct AppCoordinatorTests {
                 try assertEqual(coordinator.config.displayConfigurations["1"]?.shaderName, "cyberpunkGrid", "Shader switched to cyberpunkGrid")
                 try assertNil(coordinator.config.displayConfigurations["1"]?.assetPath, "assetPath cleared cleanly on shader set")
                 try assertNotNil(coordinator.shaderViews[1], "Shader view re-attached")
+
+                coordinator.stop()
+            }
+
+            // Test 11: CPU-Only Engine Mode (0% GPU) and Seamless Dynamic Switching
+            await runner.testAsync("CPU-Only Engine mode operates with CPULiveWallpaperView and toggles seamlessly") {
+                let storage = MockConfigStorage()
+                var cfg = EngineConfig.default
+                cfg.useCPUOnlyEngine = true
+                let videoEngine = VideoEngine(windowManager: nil)
+                let coordinator = AppCoordinator(config: cfg, configStorage: storage, videoEngine: videoEngine)
+                coordinator.start()
+
+                let window1 = MockDesktopWindow(frame: CGRect(x: 0, y: 0, width: 1920, height: 1080), displayID: 1)
+                coordinator.desktopWindowManager(coordinator.windowManager, didAddWindow: window1, for: 1)
+
+                // 1. In CPU-only mode, setting a shader preset attaches CPULiveWallpaperView (strictly 0% GPU)
+                coordinator.setShader(preset: .aurora, for: 1)
+                try assertNotNil(coordinator.cpuWallpaperViews[1], "Display 1 has CPULiveWallpaperView attached")
+                try assertNil(coordinator.shaderViews[1], "Display 1 has NO Metal shaderView attached (0% GPU)")
+                try assertEqual(coordinator.telemetryMonitor.isCPUOnlyMode, true, "Telemetry monitor is in CPU-only mode (reports 0% GPU)")
+
+                // 2. Switch to Metal GPU mode
+                coordinator.setCPUOnlyEngine(false)
+                try assertNil(coordinator.cpuWallpaperViews[1], "CPULiveWallpaperView torn down upon switching to GPU mode")
+                try assertNotNil(coordinator.shaderViews[1], "Metal ShaderWallpaperView attached upon switching to GPU mode")
+                try assertEqual(coordinator.telemetryMonitor.isCPUOnlyMode, false, "Telemetry monitor is in GPU mode")
+
+                // 3. Switch back to CPU-only mode
+                coordinator.setCPUOnlyEngine(true)
+                try assertNotNil(coordinator.cpuWallpaperViews[1], "CPULiveWallpaperView re-attached upon switching to CPU-only mode")
+                try assertNil(coordinator.shaderViews[1], "Metal ShaderWallpaperView torn down (0% GPU guaranteed)")
+                try assertEqual(coordinator.telemetryMonitor.isCPUOnlyMode, true, "Telemetry monitor returns to 0% GPU")
 
                 coordinator.stop()
             }

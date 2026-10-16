@@ -48,6 +48,9 @@ public struct EngineConfig: Codable, Equatable, Sendable {
     public var shaderPath: String?
     public var shaderSpeed: Float
 
+    // Ultra-Lightweight CPU-Only Mode (0% GPU)
+    public var useCPUOnlyEngine: Bool
+
     public var shaderPreset: ProceduralShaderPreset? {
         get {
             guard let shaderName = shaderName else { return nil }
@@ -90,6 +93,7 @@ public struct EngineConfig: Codable, Equatable, Sendable {
         shaderName: String? = nil,
         shaderPath: String? = nil,
         shaderSpeed: Float = 1.0,
+        useCPUOnlyEngine: Bool = true,
         hudConfig: HUDConfig = .init(),
         isAudioReactive: Bool = true,
         displayConfigurations: [String: DisplayConfig] = [:]
@@ -115,6 +119,7 @@ public struct EngineConfig: Codable, Equatable, Sendable {
         self.shaderName = shaderName
         self.shaderPath = shaderPath
         self.shaderSpeed = max(0.01, shaderSpeed)
+        self.useCPUOnlyEngine = useCPUOnlyEngine
         self.hudConfig = hudConfig
         self.isAudioReactive = isAudioReactive
         self.displayConfigurations = displayConfigurations
@@ -147,6 +152,7 @@ public struct EngineConfig: Codable, Equatable, Sendable {
         self.shaderName = try container.decodeIfPresent(String.self, forKey: .shaderName)
         self.shaderPath = try container.decodeIfPresent(String.self, forKey: .shaderPath)
         self.shaderSpeed = try container.decodeIfPresent(Float.self, forKey: .shaderSpeed) ?? 1.0
+        self.useCPUOnlyEngine = try container.decodeIfPresent(Bool.self, forKey: .useCPUOnlyEngine) ?? true
 
         self.hudConfig = try container.decodeIfPresent(HUDConfig.self, forKey: .hudConfig) ?? HUDConfig()
         self.isAudioReactive = try container.decodeIfPresent(Bool.self, forKey: .isAudioReactive) ?? true

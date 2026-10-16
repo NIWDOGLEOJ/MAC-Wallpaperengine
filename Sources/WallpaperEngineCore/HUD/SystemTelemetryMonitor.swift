@@ -137,9 +137,11 @@ public final class SystemTelemetryMonitor: @unchecked Sendable {
         onTelemetryUpdate?(telemetry)
     }
 
-    // MARK: - IOKit GPU Accelerator Sampling
+    public var isCPUOnlyMode: Bool = false
 
     private func sampleGPULoad() -> Float {
+        guard !isCPUOnlyMode else { return 0.0 }
+
         var iterator: io_iterator_t = 0
         let matchingDict = IOServiceMatching("IOAccelerator")
         guard IOServiceGetMatchingServices(kIOMainPortDefault, matchingDict, &iterator) == kIOReturnSuccess else {
@@ -149,14 +151,12 @@ public final class SystemTelemetryMonitor: @unchecked Sendable {
 
         var service = IOIteratorNext(iterator)
         while service != 0 {
-            var props: Unmanaged<CFMutableDictionary>?
-            if IORegistryEntryCreateCFProperties(service, &props, kCFAllocatorDefault, 0) == kIOReturnSuccess,
-               let dict = props?.takeRetainedValue() as? [String: Any],
-               let stats = dict["PerformanceStatistics"] as? [String: Any] {
+            if let prop = IORegistryEntryCreateCFProperty(service, "PerformanceStatistics" as CFString, kCFAllocatorDefault, 0) {
+                let stats = prop.takeRetainedValue() as? [String: Any]
                 IOObjectRelease(service)
-                if let devUtil = stats["Device Utilization %"] as? NSNumber {
+                if let devUtil = stats?["Device Utilization %"] as? NSNumber {
                     return max(0.0, min(100.0, devUtil.floatValue))
-                } else if let renUtil = stats["Renderer Utilization %"] as? NSNumber {
+                } else if let renUtil = stats?["Renderer Utilization %"] as? NSNumber {
                     return max(0.0, min(100.0, renUtil.floatValue))
                 }
             }

@@ -221,6 +221,7 @@ public final class MenuBarController: NSObject, MenuBarControllerProtocol, NSMen
     private var pauseOnDisplaySleepItem: NSMenuItem?
     private var pauseWhenOccludedItem: NSMenuItem?
     private var throttleOnBatteryItem: NSMenuItem?
+    private var cpuOnlyModeItem: NSMenuItem?
     private var frameRateItems: [Int: NSMenuItem] = [:]
 
     // Procedural Shader menu item references
@@ -247,6 +248,7 @@ public final class MenuBarController: NSObject, MenuBarControllerProtocol, NSMen
     public var cachedShadersSubmenu: NSMenu? { shadersSubmenu }
     public var cachedHUDSubmenu: NSMenu? { hudSubmenu }
     public var cachedAudioReactiveItem: NSMenuItem? { audioReactiveItem }
+    public var cachedCPUOnlyModeItem: NSMenuItem? { cpuOnlyModeItem }
 
     public init(
         isHeadless: Bool = false,
@@ -598,6 +600,9 @@ public final class MenuBarController: NSObject, MenuBarControllerProtocol, NSMen
         throttleOnBatteryItem = addCheckbox(title: "Throttle on Battery", selector: #selector(handleToggleThrottleOnBattery(_:)))
 
         menu.addItem(.separator())
+        cpuOnlyModeItem = addCheckbox(title: "Ultra-Lightweight CPU-Only Mode (0% GPU)", selector: #selector(handleToggleCPUOnlyMode(_:)))
+
+        menu.addItem(.separator())
 
         // Target Frame Rate Submenu
         let fpsMenu = NSMenu(title: "Target Frame Rate")
@@ -702,6 +707,7 @@ public final class MenuBarController: NSObject, MenuBarControllerProtocol, NSMen
         pauseOnDisplaySleepItem?.state = config.pauseOnDisplaySleep ? .on : .off
         pauseWhenOccludedItem?.state = config.pauseWhenOccluded ? .on : .off
         throttleOnBatteryItem?.state = config.throttleOnBattery ? .on : .off
+        cpuOnlyModeItem?.state = config.useCPUOnlyEngine ? .on : .off
 
         for (fps, item) in frameRateItems {
             item.state = (config.targetFrameRate == fps) ? .on : .off
@@ -864,6 +870,12 @@ public final class MenuBarController: NSObject, MenuBarControllerProtocol, NSMen
 
     @objc public func handleToggleThrottleOnBattery(_ sender: Any?) {
         currentConfig.throttleOnBattery.toggle()
+        updateConfig(currentConfig)
+        delegate?.menuBar(self, didUpdateConfig: currentConfig)
+    }
+
+    @objc public func handleToggleCPUOnlyMode(_ sender: Any?) {
+        currentConfig.useCPUOnlyEngine.toggle()
         updateConfig(currentConfig)
         delegate?.menuBar(self, didUpdateConfig: currentConfig)
     }

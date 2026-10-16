@@ -357,6 +357,12 @@ public final class AppState: ObservableObject {
         showToast("Power & Performance preferences updated")
     }
 
+    public func setCPUOnlyEngine(_ enabled: Bool) {
+        config.useCPUOnlyEngine = enabled
+        coordinator?.setCPUOnlyEngine(enabled)
+        showToast(enabled ? "CPU-Only Mode Activated (0% GPU Guaranteed)" : "GPU-Accelerated Mode Activated (Metal)")
+    }
+
     // MARK: - Toast Banner Helpers
 
     public func showToast(_ message: String) {

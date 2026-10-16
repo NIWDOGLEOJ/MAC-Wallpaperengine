@@ -204,18 +204,19 @@ public final class NowPlayingMonitor: @unchecked Sendable {
     }
 
     private func querySpotifyScript() -> NowPlayingInfo? {
+        guard !NSRunningApplication.runningApplications(withBundleIdentifier: "com.spotify.client").isEmpty else {
+            return nil
+        }
         let scriptSource = """
-        if application "Spotify" is running then
-            tell application "Spotify"
-                set pState to (player state as string)
-                if pState is "playing" then
-                    set trackName to name of current track
-                    set trackArtist to artist of current track
-                    set trackAlbum to album of current track
-                    return trackName & "|||" & trackArtist & "|||" & trackAlbum & "|||" & pState
-                end if
-            end tell
-        end if
+        tell application "Spotify"
+            set pState to (player state as string)
+            if pState is "playing" then
+                set trackName to name of current track
+                set trackArtist to artist of current track
+                set trackAlbum to album of current track
+                return trackName & "|||" & trackArtist & "|||" & trackAlbum & "|||" & pState
+            end if
+        end tell
         return ""
         """
         guard let script = NSAppleScript(source: scriptSource) else { return nil }
@@ -238,18 +239,19 @@ public final class NowPlayingMonitor: @unchecked Sendable {
     }
 
     private func queryAppleMusicScript() -> NowPlayingInfo? {
+        guard !NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.Music").isEmpty else {
+            return nil
+        }
         let scriptSource = """
-        if application "Music" is running then
-            tell application "Music"
-                set pState to (player state as string)
-                if pState is "playing" then
-                    set trackName to name of current track
-                    set trackArtist to artist of current track
-                    set trackAlbum to album of current track
-                    return trackName & "|||" & trackArtist & "|||" & trackAlbum & "|||" & pState
-                end if
-            end tell
-        end if
+        tell application "Music"
+            set pState to (player state as string)
+            if pState is "playing" then
+                set trackName to name of current track
+                set trackArtist to artist of current track
+                set trackAlbum to album of current track
+                return trackName & "|||" & trackArtist & "|||" & trackAlbum & "|||" & pState
+            end if
+        end tell
         return ""
         """
         guard let script = NSAppleScript(source: scriptSource) else { return nil }

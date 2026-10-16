@@ -134,7 +134,7 @@ public final class SystemAudioCapture: NSObject, @unchecked Sendable {
         }
 
         let timer = DispatchSource.makeTimerSource(queue: simulationQueue)
-        timer.schedule(deadline: .now(), repeating: .milliseconds(16)) // ~60 Hz
+        timer.schedule(deadline: .now(), repeating: .milliseconds(40)) // ~25 Hz ultra-low CPU
         timer.setEventHandler { [weak self] in
             self?.stepSimulation()
         }
@@ -154,28 +154,32 @@ public final class SystemAudioCapture: NSObject, @unchecked Sendable {
             lock.unlock()
             return
         }
-        simTime += 0.01667
+        simTime += 0.04
         let t = simTime
         lock.unlock()
 
-        // 120 BPM rhythmic simulation (2.0 Hz fundamental)
-        let beat = pow(max(0.0, sin(t * Float.pi * 2.0)), 4.0)
-        let offbeat = pow(max(0.0, sin((t + 0.25) * Float.pi * 2.0)), 6.0)
+        // 120 BPM rhythmic pulse (2.0 Hz fundamental) with zero memory allocations or FFT overhead
+        let beat = Float(pow(max(0.0, sin(Double(t) * .pi * 2.0)), 4.0))
+        let offbeat = Float(pow(max(0.0, sin((Double(t) + 0.25) * .pi * 2.0)), 6.0))
 
-        // Synthesize test samples for FFT
-        var samples = [Float](repeating: 0.0, count: analyzer.fftSize)
-        for i in 0..<analyzer.fftSize {
-            let phase = Float(i) / Float(analyzer.fftSize)
-            // Kick bass (60Hz)
-            let bassTone = sin(phase * 60.0 * 2.0 * Float.pi) * beat * 0.8
-            // Melodic synth (440Hz / 880Hz)
-            let midTone = sin(phase * 440.0 * 2.0 * Float.pi) * offbeat * 0.4
-            // Hi-hat noise / shimmer
-            let trebleTone = (Float.random(in: -0.5...0.5)) * offbeat * 0.3
-            samples[i] = bassTone + midTone + trebleTone
+        var bands = [Float](repeating: 0.0, count: 16)
+        bands[0] = beat * 0.95
+        bands[1] = beat * 0.85
+        bands[2] = beat * 0.70
+        bands[3] = offbeat * 0.60
+        bands[4] = offbeat * 0.50
+        for i in 5..<16 {
+            bands[i] = Float(sin(Double(t) * 1.5 + Double(i))) * 0.15 + 0.15
         }
 
-        let spectrum = analyzer.process(samples: samples)
+        let spectrum = AudioSpectrumData(
+            bass: beat,
+            mid: offbeat,
+            treble: bands[10],
+            amplitude: (beat * 0.6 + offbeat * 0.4),
+            bands: bands,
+            rawRMS: beat * 0.5
+        )
         onSpectrumUpdate?(spectrum)
     }
 }

@@ -69,9 +69,18 @@ public final class ShaderWallpaperView: NSView {
         mtk.autoresizingMask = [.width, .height]
         mtk.colorPixelFormat = .bgra8Unorm
         mtk.clearColor = MTLClearColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 1.0)
-        mtk.preferredFramesPerSecond = 60
+        mtk.preferredFramesPerSecond = 30
         mtk.isPaused = false
         mtk.enableSetNeedsDisplay = false
+
+        // Downscale GPU render target on 4K/5K Retina to prevent GPU pipeline saturation
+        let maxDim: CGFloat = 1920.0
+        let currentMax = max(bounds.width, bounds.height)
+        if currentMax > 0 {
+            let scale = min(1.0, maxDim / currentMax)
+            mtk.drawableSize = CGSize(width: max(1, bounds.width * scale), height: max(1, bounds.height * scale))
+            mtk.autoResizeDrawable = false
+        }
 
         guard let rend = MetalShaderRenderer(device: device) else {
             logger.error("Failed to initialize MetalShaderRenderer.")
