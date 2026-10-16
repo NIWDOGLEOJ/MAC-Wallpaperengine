@@ -164,6 +164,7 @@ public struct EngineConfig: Codable, Equatable, Sendable {
         public var showNowPlaying: Bool
         public var showAudioVisualizer: Bool
         public var scale: Float
+        public var themeSettings: ThemeSettings
 
         public enum HUDPosition: String, Codable, CaseIterable, Sendable {
             case topRight
@@ -191,7 +192,8 @@ public struct EngineConfig: Codable, Equatable, Sendable {
             showSystemStats: Bool = true,
             showNowPlaying: Bool = true,
             showAudioVisualizer: Bool = true,
-            scale: Float = 1.0
+            scale: Float = 1.0,
+            themeSettings: ThemeSettings = .default
         ) {
             self.isEnabled = isEnabled
             self.position = position
@@ -201,6 +203,7 @@ public struct EngineConfig: Codable, Equatable, Sendable {
             self.showNowPlaying = showNowPlaying
             self.showAudioVisualizer = showAudioVisualizer
             self.scale = max(0.5, min(2.0, scale))
+            self.themeSettings = themeSettings
         }
 
         public init(from decoder: Decoder) throws {
@@ -213,6 +216,7 @@ public struct EngineConfig: Codable, Equatable, Sendable {
             self.showNowPlaying = try container.decodeIfPresent(Bool.self, forKey: .showNowPlaying) ?? true
             self.showAudioVisualizer = try container.decodeIfPresent(Bool.self, forKey: .showAudioVisualizer) ?? true
             self.scale = try container.decodeIfPresent(Float.self, forKey: .scale) ?? 1.0
+            self.themeSettings = try container.decodeIfPresent(ThemeSettings.self, forKey: .themeSettings) ?? .default
         }
     }
 

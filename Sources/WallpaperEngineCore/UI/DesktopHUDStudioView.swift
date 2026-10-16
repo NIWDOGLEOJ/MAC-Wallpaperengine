@@ -45,6 +45,9 @@ public struct DesktopHUDStudioView: View {
                 // Interactive WYSIWYG Screen Anchor Mockup
                 screenAnchorMockupCard
 
+                // Dynamic Wallpaper Theme Studio
+                wallpaperThemeStudioCard
+
                 // Widget Toggles & Scale Customizer
                 widgetOptionsCard
             }
@@ -168,7 +171,12 @@ public struct DesktopHUDStudioView: View {
     // Mini preview card rendered on top of the mockup
     private var miniHUDPreview: some View {
         let pos = state.config.hudConfig.position
-        let accent = Color(state.activeWallpaperAccentColor)
+        let theme = state.activeWallpaperTheme
+        let accent = theme.accentSwiftUIColor
+        let surface = theme.surfaceSwiftUIColor.opacity(state.config.hudConfig.themeSettings.backgroundOpacity)
+        let border = theme.borderSwiftUIColor
+        let textPri = theme.textPrimarySwiftUIColor
+        let textSec = theme.textSecondarySwiftUIColor
 
         return GeometryReader { geo in
             VStack(alignment: .leading, spacing: 4) {
@@ -176,11 +184,12 @@ public struct DesktopHUDStudioView: View {
                     Circle().fill(accent).frame(width: 5, height: 5)
                     Text("10:42 PM")
                         .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(textPri)
                 }
 
                 HStack(spacing: 4) {
                     Text("CPU: 18%").font(.system(size: 7)).foregroundColor(accent)
-                    Text("RAM: 8.4GB").font(.system(size: 7)).foregroundColor(.secondary)
+                    Text("RAM: 8.4GB").font(.system(size: 7)).foregroundColor(textSec)
                 }
 
                 if state.config.hudConfig.showNowPlaying {
@@ -191,11 +200,11 @@ public struct DesktopHUDStudioView: View {
                 }
             }
             .padding(8)
-            .background(.ultraThinMaterial)
+            .background(surface)
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
-                    .stroke(accent.opacity(0.35), lineWidth: 1)
+                    .stroke(border, lineWidth: 1)
             )
             .shadow(radius: 6)
             .frame(width: 110)
@@ -301,5 +310,209 @@ public struct DesktopHUDStudioView: View {
             Toggle("", isOn: isOn)
                 .toggleStyle(.switch)
         }
+    }
+
+    // MARK: - Dynamic Wallpaper Theme Studio Card
+
+    private var wallpaperThemeStudioCard: some View {
+        let theme = state.activeWallpaperTheme
+        let settings = state.config.hudConfig.themeSettings
+
+        return VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                Label("Dynamic Wallpaper Theme Studio", systemImage: "paintpalette.fill")
+                    .font(.headline)
+                    .foregroundColor(theme.accentSwiftUIColor)
+
+                Spacer()
+
+                // WCAG AA Badge
+                HStack(spacing: 5) {
+                    Image(systemName: theme.contrastRatio >= 4.5 ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                        .foregroundColor(theme.contrastRatio >= 4.5 ? theme.successSwiftUIColor : theme.warningSwiftUIColor)
+                        .font(.system(size: 11))
+                    Text("WCAG AA \(String(format: "%.1f:1", theme.contrastRatio))")
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    Text(theme.isDark ? "• Dark" : "• Light")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(.secondary)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(theme.surfaceSwiftUIColor.opacity(0.6))
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(theme.borderSwiftUIColor, lineWidth: 1))
+            }
+
+            Text("Intelligent color extraction adapting widget background, borders, text, and spectrum to any active wallpaper.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+
+            // Live Semantic Palette Swatches
+            HStack(spacing: 8) {
+                paletteSwatch(name: "Primary", color: theme.primarySwiftUIColor)
+                paletteSwatch(name: "Secondary", color: theme.secondarySwiftUIColor)
+                paletteSwatch(name: "Accent", color: theme.accentSwiftUIColor)
+                paletteSwatch(name: "Surface", color: theme.surfaceSwiftUIColor)
+                paletteSwatch(name: "Border", color: theme.borderSwiftUIColor)
+                paletteSwatch(name: "Text", color: theme.textPrimarySwiftUIColor)
+            }
+            .padding(.vertical, 4)
+
+            Divider()
+
+            // Mode Selector
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("Adaptation Mode")
+                        .font(.subheadline.weight(.medium))
+                    Spacer()
+                    Picker("", selection: Binding(
+                        get: { state.config.hudConfig.themeSettings.mode },
+                        set: { newMode in state.updateThemeSettings { $0.mode = newMode } }
+                    )) {
+                        ForEach(ThemeMode.allCases) { mode in
+                            Text(mode.rawValue).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 320)
+                }
+
+                Text(settings.mode.description)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+
+            Divider()
+
+            // Surface Appearance & Accent Vibrancy
+            HStack(spacing: 24) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Surface Tone")
+                        .font(.subheadline.weight(.medium))
+                    Picker("", selection: Binding(
+                        get: { state.config.hudConfig.themeSettings.appearancePreference },
+                        set: { newPref in state.updateThemeSettings { $0.appearancePreference = newPref } }
+                    )) {
+                        ForEach(AppearancePreference.allCases) { pref in
+                            Text(pref.rawValue).tag(pref)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Accent Intensity")
+                        .font(.subheadline.weight(.medium))
+                    Picker("", selection: Binding(
+                        get: { state.config.hudConfig.themeSettings.accentIntensity },
+                        set: { newInt in state.updateThemeSettings { $0.accentIntensity = newInt } }
+                    )) {
+                        ForEach(AccentIntensity.allCases) { intensity in
+                            Text(intensity.rawValue).tag(intensity)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            Divider()
+
+            // Background Glass Opacity Slider
+            HStack {
+                Text("Glass Surface Opacity")
+                    .font(.subheadline)
+                Spacer()
+                Slider(value: Binding(
+                    get: { state.config.hudConfig.themeSettings.backgroundOpacity },
+                    set: { val in state.updateThemeSettings { $0.backgroundOpacity = val } }
+                ), in: 0.20...1.00, step: 0.05)
+                .frame(width: 160)
+
+                Text(String(format: "%.0f%%", state.config.hudConfig.themeSettings.backgroundOpacity * 100))
+                    .font(.system(.caption, design: .monospaced))
+                    .frame(width: 44, alignment: .trailing)
+            }
+
+            // Live Sampling Interval Slider (Mode B)
+            if settings.mode == .liveAdaptive || settings.mode == .automatic {
+                Divider()
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Live Video Sampling Interval")
+                            .font(.subheadline)
+                        Text("Cadence for sampling video frames without GPU stalls")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                    Slider(value: Binding(
+                        get: { state.config.hudConfig.themeSettings.liveUpdateInterval },
+                        set: { val in state.updateThemeSettings { $0.liveUpdateInterval = val } }
+                    ), in: 1.0...10.0, step: 0.5)
+                    .frame(width: 160)
+
+                    Text(String(format: "%.1fs", state.config.hudConfig.themeSettings.liveUpdateInterval))
+                        .font(.system(.caption, design: .monospaced))
+                        .frame(width: 44, alignment: .trailing)
+                }
+            }
+
+            Divider()
+
+            // Palette Lock & Reset Buttons
+            HStack(spacing: 16) {
+                Toggle("Lock Current Palette", isOn: Binding(
+                    get: { state.config.hudConfig.themeSettings.isLocked },
+                    set: { locked in
+                        if locked {
+                            state.lockCurrentTheme()
+                        } else {
+                            state.resetThemeToAutomatic()
+                        }
+                    }
+                ))
+                .toggleStyle(.checkbox)
+                .font(.subheadline)
+
+                Spacer()
+
+                Button(action: {
+                    state.resetThemeToAutomatic()
+                }) {
+                    Label("Reset to Wallpaper Auto", systemImage: "arrow.counterclockwise")
+                        .font(.caption.weight(.medium))
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+        .padding(18)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.8))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+        )
+    }
+
+    private func paletteSwatch(name: String, color: Color) -> some View {
+        VStack(spacing: 4) {
+            RoundedRectangle(cornerRadius: 6)
+                .fill(color)
+                .frame(height: 28)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                )
+                .shadow(color: color.opacity(0.3), radius: 3, x: 0, y: 1)
+
+            Text(name)
+                .font(.system(size: 9, weight: .medium))
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity)
     }
 }

@@ -90,6 +90,7 @@ public final class AppState: ObservableObject {
     @Published public var isAudioReactive: Bool = true
     @Published public var discoveredVideos: [WallpaperVideoItem] = []
     @Published public var activeWallpaperAccentColor: NSColor = WallpaperColorExtractor.auroraAccent
+    @Published public var activeWallpaperTheme: WallpaperTheme = .fallback
 
     // MARK: - Interactive UI View State (Stored in AppState to avoid Command Line Tools SwiftUI macro missing symbols)
     @Published public var galleryCategory: GalleryCategory = .all
@@ -218,6 +219,40 @@ public final class AppState: ObservableObject {
     public func updateActiveWallpaperAccentColor() {
         let active = activeWallpaper()
         self.activeWallpaperAccentColor = WallpaperColorExtractor.shared.dominantAccentColor(for: active)
+    }
+
+    public func updateActiveTheme(_ theme: WallpaperTheme) {
+        self.activeWallpaperTheme = theme
+        self.activeWallpaperAccentColor = theme.accent
+    }
+
+    public func updateThemeSettings(_ block: (inout ThemeSettings) -> Void) {
+        var settings = config.hudConfig.themeSettings
+        block(&settings)
+        updateHUDConfig { $0.themeSettings = settings }
+    }
+
+    public func lockCurrentTheme() {
+        guard let id = selectedDisplayID ?? displays.first?.displayID else { return }
+        coordinator?.themeManager.lockCurrentPalette(for: id)
+        if let currentTheme = coordinator?.themeManager.themes[id] {
+            updateThemeSettings {
+                $0.isLocked = true
+                $0.manualTheme = currentTheme
+            }
+            showToast("Locked current wallpaper theme")
+        }
+    }
+
+    public func resetThemeToAutomatic() {
+        guard let id = selectedDisplayID ?? displays.first?.displayID else { return }
+        coordinator?.themeManager.resetToAutomatic(for: id)
+        updateThemeSettings {
+            $0.isLocked = false
+            $0.mode = .automatic
+            $0.manualTheme = nil
+        }
+        showToast("Reset theme to automatic wallpaper adaptation")
     }
 
     // MARK: - Engine Control Actions

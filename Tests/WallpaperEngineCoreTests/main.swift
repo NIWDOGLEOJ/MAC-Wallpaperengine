@@ -45,6 +45,9 @@ await ShaderTests.runAllTests()
 // --- Audio-Reactive Visualizer & Desktop HUD Suites ---
 await AudioHUDTests.runAllTests()
 
+// --- Dynamic Wallpaper-Aware Theming Suite ---
+await ThemeEngineTests.runAllTests()
+
 // --- Native macOS Application UI & Studio Suites ---
 await AppUITests.runAllTests()
 

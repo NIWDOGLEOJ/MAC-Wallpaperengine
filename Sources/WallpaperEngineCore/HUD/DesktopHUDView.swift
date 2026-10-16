@@ -44,6 +44,7 @@ public final class DesktopHUDView: NSView {
     private var clockTimer: Timer?
     private var appearanceObserver: NSObjectProtocol?
     public var config: EngineConfig.HUDConfig = .init()
+    public private(set) var currentTheme: WallpaperTheme = .fallback
     public private(set) var currentAccentColor: NSColor = WallpaperColorExtractor.auroraAccent
 
     public var isDarkMode: Bool {
@@ -361,69 +362,101 @@ public final class DesktopHUDView: NSView {
         CATransaction.commit()
     }
 
-    // MARK: - Dynamic Wallpaper Accent & Theme Synchronization
+    // MARK: - Dynamic Wallpaper Accent & Semantic Theme Synchronization
+
+    public func applyTheme(_ theme: WallpaperTheme, animated: Bool = true) {
+        self.currentTheme = theme
+        self.currentAccentColor = theme.accent
+
+        let duration = animated ? 0.40 : 0.0
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = duration
+            context.allowsImplicitAnimation = animated
+
+            // 1. Visual Effect & Outer Backdrop
+            visualEffectView.material = theme.isDark ? .hudWindow : .sheet
+            shadow?.shadowColor = theme.isDark ? NSColor.black.withAlphaComponent(0.45) : NSColor.black.withAlphaComponent(0.12)
+
+            if let glassLayer = visualEffectView.layer {
+                glassLayer.backgroundColor = theme.background.cgColor
+                glassLayer.borderColor = theme.border.cgColor
+            }
+
+            // 2. Clock & Date Typography
+            timeLabel.textColor = theme.textPrimary
+            dateLabel.textColor = theme.textSecondary
+
+            // 3. Now Playing Card Styling
+            if let npLayer = nowPlayingContainer.layer {
+                npLayer.backgroundColor = theme.surfaceElevated.cgColor
+                npLayer.borderColor = theme.border.cgColor
+            }
+
+            trackTitleLabel.textColor = theme.textPrimary
+            trackArtistLabel.textColor = theme.textSecondary
+            musicGlyphLabel.textColor = theme.accent
+            miniEqualizerView.updateAccentColor(theme.accent)
+
+            // 4. Badges (CPU, RAM, FPS) with Harmonious Wallpaper Accents
+            cpuBadge.updateTheme(
+                accentColor: theme.primary,
+                surfaceColor: theme.surface,
+                textColor: theme.textPrimary,
+                borderColor: theme.border,
+                isDarkMode: theme.isDark
+            )
+            ramBadge.updateTheme(
+                accentColor: theme.secondary,
+                surfaceColor: theme.surface,
+                textColor: theme.textPrimary,
+                borderColor: theme.border,
+                isDarkMode: theme.isDark
+            )
+            fpsBadge.updateTheme(
+                accentColor: theme.accent,
+                surfaceColor: theme.surface,
+                textColor: theme.textPrimary,
+                borderColor: theme.border,
+                isDarkMode: theme.isDark
+            )
+
+            // 5. Mini Equalizer & Spectrum Bars
+            updateSpectrumColors(theme: theme)
+        }
+    }
 
     public func applyWallpaperAccentColor(_ color: NSColor) {
         self.currentAccentColor = color
-        updateThemeAppearance()
+        let pal = ExtractedPalette(
+            dominant: CodableRGBA(nsColor: color),
+            vibrant: CodableRGBA(nsColor: color),
+            secondary: CodableRGBA(nsColor: WallpaperColorExtractor.secondaryAccentColor(for: color)),
+            darkMuted: CodableRGBA(nsColor: NSColor(calibratedHue: color.hueComponent, saturation: 0.35, brightness: 0.12, alpha: 1.0)),
+            lightMuted: CodableRGBA(nsColor: NSColor(calibratedHue: color.hueComponent, saturation: 0.20, brightness: 0.94, alpha: 1.0)),
+            averageLuminance: isDarkMode ? 0.15 : 0.85,
+            isPredominantlyDark: isDarkMode
+        )
+        let generated = AdaptiveThemeGenerator.shared.generateTheme(
+            from: pal,
+            settings: ThemeSettings(appearancePreference: isDarkMode ? .preferDark : .preferLight)
+        )
+        applyTheme(generated, animated: true)
+        self.currentAccentColor = color
     }
 
     public func updateThemeAppearance() {
-        let dark = isDarkMode
-
-        // 1. Visual Effect & Outer Backdrop
-        visualEffectView.material = dark ? .hudWindow : .sheet
-        shadow?.shadowColor = dark ? NSColor.black.withAlphaComponent(0.45) : NSColor.black.withAlphaComponent(0.12)
-
-        if let glassLayer = visualEffectView.layer {
-            glassLayer.backgroundColor = dark
-                ? NSColor(white: 0.08, alpha: 0.65).cgColor
-                : NSColor(white: 0.96, alpha: 0.82).cgColor
-            glassLayer.borderColor = dark
-                ? currentAccentColor.withAlphaComponent(0.35).cgColor
-                : currentAccentColor.withAlphaComponent(0.25).cgColor
-        }
-
-        // 2. Clock & Date Typography
-        timeLabel.textColor = dark ? .white : NSColor(white: 0.08, alpha: 1.0)
-        dateLabel.textColor = dark ? NSColor(white: 0.85, alpha: 0.90) : NSColor(white: 0.35, alpha: 0.95)
-
-        // 3. Now Playing Card Styling
-        if let npLayer = nowPlayingContainer.layer {
-            npLayer.backgroundColor = dark
-                ? NSColor(white: 0.15, alpha: 0.45).cgColor
-                : NSColor(white: 0.0, alpha: 0.05).cgColor
-            npLayer.borderColor = dark
-                ? NSColor(white: 1.0, alpha: 0.12).cgColor
-                : NSColor(white: 0.0, alpha: 0.08).cgColor
-        }
-
-        trackTitleLabel.textColor = dark ? .white : NSColor(white: 0.10, alpha: 1.0)
-        trackArtistLabel.textColor = dark ? NSColor(white: 0.75, alpha: 0.85) : NSColor(white: 0.38, alpha: 0.95)
-        musicGlyphLabel.textColor = currentAccentColor
-
-        // 4. Badges (CPU, RAM, FPS) with Harmonious Wallpaper Accents
-        let secondary = WallpaperColorExtractor.secondaryAccentColor(for: currentAccentColor)
-        let complementary = WallpaperColorExtractor.complementaryAccentColor(for: currentAccentColor)
-
-        cpuBadge.updateTheme(accentColor: currentAccentColor, isDarkMode: dark)
-        ramBadge.updateTheme(accentColor: secondary, isDarkMode: dark)
-        fpsBadge.updateTheme(accentColor: complementary, isDarkMode: dark)
-
-        // 5. Mini Equalizer & Spectrum Bars
-        miniEqualizerView.updateAccentColor(currentAccentColor)
-        updateSpectrumColors()
+        applyWallpaperAccentColor(currentAccentColor)
     }
 
-    private func updateSpectrumColors() {
-        let secondary = WallpaperColorExtractor.secondaryAccentColor(for: currentAccentColor)
+    private func updateSpectrumColors(theme: WallpaperTheme? = nil) {
+        let t = theme ?? currentTheme
         let total = max(1, spectrumBars.count - 1)
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         for (i, bar) in spectrumBars.enumerated() {
             let progress = CGFloat(i) / CGFloat(total)
-            let color = interpolateColor(from: currentAccentColor, to: secondary, progress: progress)
+            let color = interpolateColor(from: t.primary, to: t.secondary, progress: progress)
             bar.backgroundColor = color.cgColor
         }
         CATransaction.commit()
@@ -534,6 +567,18 @@ final class SystemStatBadgeView: NSView {
     }
 
     required init?(coder: NSCoder) { fatalError() }
+
+    func updateTheme(accentColor: NSColor, surfaceColor: NSColor, textColor: NSColor, borderColor: NSColor, isDarkMode: Bool) {
+        self.currentAccentColor = accentColor
+        titleLabel.textColor = accentColor
+        valueLabel.textColor = textColor
+        progressLayer.backgroundColor = accentColor.withAlphaComponent(isDarkMode ? 0.35 : 0.25).cgColor
+
+        if let l = layer {
+            l.backgroundColor = surfaceColor.cgColor
+            l.borderColor = borderColor.cgColor
+        }
+    }
 
     func updateTheme(accentColor: NSColor, isDarkMode: Bool) {
         self.currentAccentColor = accentColor

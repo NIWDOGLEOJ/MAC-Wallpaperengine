@@ -32,6 +32,7 @@ public protocol AppCoordinatorProtocol: AnyObject {
     var telemetryMonitor: SystemTelemetryMonitor { get }
     var appState: AppState? { get }
     var mainWindowController: MainWindowController? { get }
+    var themeManager: ThemeManager { get }
 
     func start()
     func stop()
@@ -83,6 +84,7 @@ public final class AppCoordinator: NSObject,
     public let audioCapture: SystemAudioCapture
     public let nowPlayingMonitor: NowPlayingMonitor
     public let telemetryMonitor: SystemTelemetryMonitor
+    public let themeManager: ThemeManager
     public private(set) var appState: AppState?
     public private(set) var mainWindowController: MainWindowController?
     private let configStorage: ConfigStorageProtocol
@@ -124,6 +126,7 @@ public final class AppCoordinator: NSObject,
         self.audioCapture = audioCapture
         self.nowPlayingMonitor = nowPlayingMonitor
         self.telemetryMonitor = telemetryMonitor
+        self.themeManager = ThemeManager(settings: resolvedConfig.hudConfig.themeSettings)
         self.currentPowerState = powerObserver.currentState
         self.currentSleepLockState = sleepLockObserver.currentState
 
@@ -154,6 +157,32 @@ public final class AppCoordinator: NSObject,
         self.occlusionManager.delegate = self
         self.videoEngine.delegate = self
         self.menuBarController?.delegate = self
+
+        // Wire ThemeManager Callbacks
+        self.themeManager.videoTimeProvider = { [weak self] displayID in
+            self?.videoEngine.player(for: displayID)?.currentTime
+        }
+        self.themeManager.videoURLProvider = { [weak self] displayID in
+            guard let self = self else { return nil }
+            let key = String(displayID)
+            if let path = self.config.displayConfigurations[key]?.assetPath {
+                return URL(fileURLWithPath: path)
+            }
+            if let path = self.config.defaultAssetPath {
+                return URL(fileURLWithPath: path)
+            }
+            return nil
+        }
+        self.themeManager.isEnginePaused = { [weak self] in
+            self?.config.isPaused ?? false
+        }
+        self.themeManager.onThemeUpdate = { [weak self] displayID, theme in
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
+                self.hudViews[displayID]?.applyTheme(theme, animated: true)
+                self.appState?.updateActiveTheme(theme)
+            }
+        }
 
         // Wire Audio & Telemetry Callbacks
         self.audioCapture.onSpectrumUpdate = { [weak self] spectrum in
@@ -236,6 +265,9 @@ public final class AppCoordinator: NSObject,
         // 7. Perform initial state reconciliation & populate Menu Bar displays
         reconcileAllScreens()
         refreshMenuBarDisplays()
+
+        // 8. Start Dynamic Wallpaper Theme Manager
+        themeManager.start()
         logger.info("AppCoordinator started successfully with \(self.windowManager.managedWindows.count) displays.")
     }
 
@@ -243,6 +275,9 @@ public final class AppCoordinator: NSObject,
         guard isRunning else { return }
         isRunning = false
         logger.info("Stopping AppCoordinator...")
+
+        // 0. Halt Dynamic Wallpaper Theme Manager
+        themeManager.stop()
 
         // 1. Halt observers to prevent callbacks during teardown
         powerObserver.stop()
@@ -381,6 +416,11 @@ public final class AppCoordinator: NSObject,
 
         // Always ensure HUD is frontmost in window's contentView
         window.underlyingWindow.contentView?.addSubview(hudView)
+
+        if let currentTheme = themeManager.themes[displayID] {
+            hudView.applyTheme(currentTheme, animated: false)
+        }
+
         syncWallpaperAccentColor(for: displayID)
     }
 
@@ -415,31 +455,29 @@ public final class AppCoordinator: NSObject,
         return .none
     }
 
-    public func syncWallpaperAccentColor(for displayID: CGDirectDisplayID) {
-        guard let hudView = hudViews[displayID] else { return }
-        let wallpaperType = activeWallpaperType(for: displayID)
-        let color = WallpaperColorExtractor.shared.dominantAccentColor(for: wallpaperType)
-        hudView.applyWallpaperAccentColor(color)
-        appState?.updateActiveWallpaperAccentColor()
-
-        // If it's a video or photo, run async extraction to ensure exact color
-        switch wallpaperType {
-        case .video(let path):
-            let url = URL(fileURLWithPath: path)
-            Task { @MainActor [weak self, weak hudView] in
-                let extracted = await WallpaperColorExtractor.shared.extractAccentColor(fromVideoAt: url)
-                hudView?.applyWallpaperAccentColor(extracted)
-                self?.appState?.activeWallpaperAccentColor = extracted
-            }
+    public func wallpaperSourceType(for displayID: CGDirectDisplayID) -> WallpaperSourceType {
+        let active = activeWallpaperType(for: displayID)
+        switch active {
+        case .shader(let preset):
+            return .applicationShader(preset: preset)
+        case .customShader(let path):
+            return .applicationCustomShader(path: path)
         case .parallax(let path):
-            let url = URL(fileURLWithPath: path)
-            if let extracted = WallpaperColorExtractor.shared.extractAccentColor(fromImageAt: url) {
-                hudView.applyWallpaperAccentColor(extracted)
-                appState?.activeWallpaperAccentColor = extracted
+            return .applicationParallax(path: path)
+        case .video(let path):
+            return .applicationVideo(path: path)
+        case .none:
+            if let screen = windowManager.screenManager.screen(for: displayID),
+               let url = NSWorkspace.shared.desktopImageURL(for: screen) {
+                return .systemDesktopImage(url: url)
             }
-        default:
-            break
+            return .none
         }
+    }
+
+    public func syncWallpaperAccentColor(for displayID: CGDirectDisplayID) {
+        let sourceType = wallpaperSourceType(for: displayID)
+        themeManager.monitor.notifyApplicationWallpaperChange(displayID: displayID, type: sourceType)
     }
 
     private func attachShader(to window: DesktopWindowProtocol, displayID: CGDirectDisplayID, preset: ProceduralShaderPreset) {
@@ -942,6 +980,7 @@ public final class AppCoordinator: NSObject,
         update(&config)
         appState?.config = config
         menuBarController?.updateConfig(config)
+        themeManager.settings = config.hudConfig.themeSettings
         for (id, window) in attachedWindows {
             attachOrUpdateHUD(for: id, in: window)
         }
