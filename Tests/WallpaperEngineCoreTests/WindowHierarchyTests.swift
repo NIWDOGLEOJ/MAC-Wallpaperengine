@@ -131,7 +131,7 @@ public struct WindowHierarchyTests {
                 try assertFalse(window.canHide, "canHide must be false")
                 try assertFalse(window.hidesOnDeactivate, "hidesOnDeactivate must be false")
                 try assertEqual(window.animationBehavior, .none, "Animation behavior must be .none")
-                try assertEqual(window.sharingType, .none, "Sharing type must be .none")
+                try assertEqual(window.sharingType, .readOnly, "Sharing type must be .readOnly so screenshots and capture utilities capture wallpaper & widget")
                 window.closeAndRelease()
             }
         }

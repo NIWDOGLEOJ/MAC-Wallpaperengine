@@ -27,3 +27,7 @@ probe_m2_watchdog_multidisplay
 *.mlmodelc/
 Resources/Models/
 
+# Build and Distribution Artifacts
+dist/
+*.dmg
+

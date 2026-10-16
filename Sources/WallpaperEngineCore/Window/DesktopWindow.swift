@@ -186,7 +186,7 @@ public final class DesktopWindow: NSWindow, DesktopWindowProtocol {
         self.hidesOnDeactivate = false
         self.animationBehavior = .none
         self.isReleasedWhenClosed = false
-        self.sharingType = .none
+        self.sharingType = .readOnly
         self.displaysWhenScreenProfileChanges = true
     }
 
